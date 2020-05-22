@@ -1,14 +1,13 @@
-use cancellation::CancellationToken;
-use hidapi::{HidDevice, HidError};
-
 use crate::error::*;
 use crate::message_channel::FrameChannel;
+
+use cancellation::{CancellationToken, OperationCanceled};
+use hidapi::{HidDevice, HidError};
 
 pub struct HidFrameChannel {
     device: HidDevice,
 }
 
-#[allow(dead_code)]
 impl HidFrameChannel {
     pub fn new(device: HidDevice) -> Self {
         HidFrameChannel { device }
@@ -26,8 +25,7 @@ impl HidFrameChannel {
 
             if i < chunks.len() {
                 frame.push(chunks[i].len() as u8);
-            }
-            else {
+            } else {
                 frame.push(0xFF);
             }
 
@@ -65,13 +63,12 @@ impl HidFrameChannel {
             }
 
             println!("read: {:02X?}", buf.to_vec());
-            
+
             if r_count != buf.len() {
                 return Err(ByteChannelError::Other(format!(
                     "head read size is incorrect"
                 )));
             }
-
             break;
         }
 
@@ -87,12 +84,18 @@ impl FrameChannel for HidFrameChannel {
     }
 
     fn read(&self, ct: &CancellationToken) -> Result<Vec<u8>, ByteChannelError> {
-        Ok(self.read_frame(ct,|x| Ok(self.device.read(x)?))?)
+        Ok(self.read_frame(ct, |x| Ok(self.device.read(x)?))?)
     }
 }
 
 impl From<HidError> for ByteChannelError {
     fn from(error: HidError) -> Self {
         ByteChannelError::Other(format!("{}", error))
+    }
+}
+
+impl From<OperationCanceled> for ByteChannelError {
+    fn from(error: OperationCanceled) -> Self {
+        ByteChannelError::OperationCanceled()
     }
 }

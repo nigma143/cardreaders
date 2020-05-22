@@ -2,6 +2,5 @@
 
 members = [
     "test_app",
-    "tlv_parser",
     "undefine_nfc_reader"
 ]

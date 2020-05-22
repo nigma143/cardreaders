@@ -1,7 +1,7 @@
-use cancellation::{CancellationToken, CancellationTokenSource, OperationCanceled};
-
 use crate::error::{ByteChannelError, MessageChannelError};
-use crate::number;
+
+use byteorder::{BigEndian, ByteOrder};
+use cancellation::{CancellationToken, CancellationTokenSource};
 
 pub trait FrameChannel {
     fn write(&self, frame: &[u8], ct: &CancellationToken) -> Result<(), ByteChannelError>;
@@ -23,7 +23,6 @@ where
     channel: T,
 }
 
-#[allow(dead_code)]
 impl<T> MessageChannel<T>
 where
     T: FrameChannel,
@@ -72,7 +71,7 @@ where
 
         let mut raw_message = Vec::new();
         raw_message.push(0x02);
-        raw_message.append(&mut number::calculate_length_field(raw_message_size));
+        raw_message.append(&mut Self::calculate_length_field(raw_message_size));
         raw_message.push(0x00);
 
         match message {
@@ -91,7 +90,7 @@ where
             _ => panic!("invalid message type"),
         };
 
-        raw_message.push(number::calculate_lrc(&raw_message));
+        raw_message.push(Self::calculate_lrc(&raw_message));
         raw_message.push(0x03);
 
         write(&raw_message)?;
@@ -123,7 +122,7 @@ where
             return Err(MessageChannelError::Other(format!("expected STX")));
         }
 
-        let (m_len, offset) = number::get_message_length(&buf, 1)
+        let (m_len, offset) = Self::get_message_length(&buf, 1)
             .ok_or(MessageChannelError::Other(format!("incorrect LEN")))?;
 
         while buf.len() < m_len as usize {
@@ -147,7 +146,7 @@ where
             return Err(MessageChannelError::Other(format!("expected ETX")));
         }
 
-        if lrc != number::calculate_lrc(&buf[0..lrc_index]) {
+        if lrc != Self::calculate_lrc(&buf[0..lrc_index]) {
             return Err(MessageChannelError::Other(format!("incorrect LRC")));
         }
 
@@ -155,9 +154,7 @@ where
 
         match opcode {
             0x15 => Ok(Message::Nack {
-                code: number::to_u16_big_endian(&payload).ok_or(
-                    MessageChannelError::Other(format!("incorrect NACK error code block")),
-                )?,
+                code: BigEndian::read_u16(&payload),
             }),
             0x3E => Ok(Message::Do {
                 payload: payload.to_vec(),
@@ -172,6 +169,41 @@ where
                 payload: payload.to_vec(),
             }),
             _ => Err(MessageChannelError::Other(format!("inccorect OPCODE"))),
+        }
+    }
+
+    fn calculate_length_field(byte_size: usize) -> Vec<u8> {
+        if byte_size + 1 <= 0x7F {
+            vec![(byte_size + 1) as u8]
+        } else if byte_size + 2 <= 0xFF {
+            vec![0x81, (byte_size + 2) as u8]
+        } else if byte_size + 3 <= 0xFFFF {
+            let mut vec: Vec<u8> = vec![0x82];
+            BigEndian::write_u16(&mut vec, byte_size as u16);
+            vec
+        } else {
+            panic!("incorrect message size");
+        }
+    }
+
+    fn calculate_lrc(buf: &[u8]) -> u8 {
+        let mut lrc: u8 = 0;
+        for b in buf {
+            lrc ^= b;
+        }
+        return lrc;
+    }
+
+    fn get_message_length(buf: &[u8], offset: usize) -> Option<(u16, usize)> {
+        if buf[offset] == 0x81 {
+            Some((buf[offset + 1] as u16, offset + 2))
+        } else if buf[offset] == 0x82 {
+            Some((
+                BigEndian::read_u16(&buf[(offset + 1)..=(offset + 3)]),
+                offset + 3,
+            ))
+        } else {
+            Some((buf[offset] as u16, offset + 1))
         }
     }
 }

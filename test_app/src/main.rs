@@ -1,8 +1,9 @@
 use hidapi::*;
+use std::fmt;
+use tlv_parser::tlv::Tlv;
 use undefine_nfc_reader::frame_channel::HidFrameChannel;
 use undefine_nfc_reader::message_channel::{Message, MessageChannel};
-use tlv_parser::tlv::Tlv;
-use std::fmt;
+use undefine_nfc_reader::tlv::TlvExtended;
 
 fn main() {
     let hidapi = HidApi::new().unwrap();
@@ -25,43 +26,10 @@ fn main() {
         Message::Do { payload } => payload,
         Message::Get { payload } => payload,
         Message::Set { payload } => payload,
-        _ => panic!(":dsfdsfdsf")
+        _ => panic!(":dsfdsfdsf"),
     };
-
 
     let tlv = Tlv::from_vec(&payload).unwrap();
 
-    println!("{}", TlvExtended { tlv: tlv });
-}
-
-struct TlvExtended {
-    tlv: Tlv
-}
-
-impl TlvExtended {
-    fn fmt_ext(tlv: &Tlv, ident: &mut String, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}- {:02X}: ", &ident, tlv.tag())?;
-        match tlv.val() {            
-            tlv_parser::tlv::Value::Val(val) => {
-                write!(f, "{:02X?}", val)
-            }
-            tlv_parser::tlv::Value::TlvList(childs) => {
-                writeln!(f)?;
-                ident.push_str("  ");
-                for child in childs {
-                    Self::fmt_ext(child, ident, f)?;
-                }
-                Ok(())
-            }
-            tlv_parser::tlv::Value::Nothing => {
-                write!(f, "")
-            }
-        }
-    }
-}
-
-impl fmt::Display for TlvExtended {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Self::fmt_ext(&self.tlv, &mut "".to_owned(), f)
-    }
+    println!("{}", TlvExtended::new(tlv));
 }
