@@ -1,11 +1,14 @@
+use std::ops::{Deref, DerefMut};
+
 use hidapi::*;
-use std::fmt;
-use tlv_parser::tlv::Tlv;
+use tlv_parser::tlv::{Tlv, Value};
 use undefine_nfc_reader::frame_channel::HidFrameChannel;
 use undefine_nfc_reader::message_channel::{Message, MessageChannel};
-use undefine_nfc_reader::tlv::TlvExtended;
+use undefine_nfc_reader::tlv::{display_tlv, AsciiString, TlvExtensions, TlvValue};
 
 fn main() {
+    simple_logger::init().unwrap();
+
     let hidapi = HidApi::new().unwrap();
     let device = hidapi.open(0x1089, 0x0001).unwrap();
     device.set_blocking_mode(false).unwrap();
@@ -31,5 +34,23 @@ fn main() {
 
     let tlv = Tlv::from_vec(&payload).unwrap();
 
-    println!("{}", TlvExtended::new(tlv));
+    println!("{}", display_tlv(&tlv));
+
+    let v: AsciiString = tlv.find_val_ext("FF01 / DF46").unwrap().unwrap();
+    println!("{}", *v);
+
+    let n_tlv = Tlv::new(
+        0xFF01,
+        Value::TlvList(vec![Tlv::new(
+            0x0C,
+            Value::Val(AsciiString::new("Hui".to_owned()).bytes()),
+        )
+        .unwrap()]),
+    )
+    .unwrap();
+
+    println!("{}", display_tlv(&n_tlv));
+
+    let v: AsciiString = n_tlv.find_val_ext("FF01 / 0C").unwrap().unwrap();
+    println!("{}", *v);
 }

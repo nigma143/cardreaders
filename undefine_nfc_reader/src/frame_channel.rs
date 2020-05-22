@@ -35,7 +35,7 @@ impl HidFrameChannel {
                 frame.push(0x00);
             }
 
-            println!("write: {:02X?}", frame);
+            log::info!("write: {:02X?}", frame);
 
             let w_count = write(&frame)?;
             if w_count != frame.len() {
@@ -62,7 +62,7 @@ impl HidFrameChannel {
                 continue;
             }
 
-            println!("read: {:02X?}", buf.to_vec());
+            log::info!("read: {:02X?}", buf.to_vec());
 
             if r_count != buf.len() {
                 return Err(ByteChannelError::Other(format!(

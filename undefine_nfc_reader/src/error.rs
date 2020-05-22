@@ -15,6 +15,13 @@ pub enum MessageChannelError {
     #[error("{0}")]
     Other(String),
 }
+#[derive(Error, Debug)]
+pub enum TlvValueParseError {
+    #[error("many values")]
+    ManyValues,
+    #[error("{0}")]
+    Other(String),
+}
 
 impl From<ByteChannelError> for MessageChannelError {
     fn from(error: ByteChannelError) -> Self {

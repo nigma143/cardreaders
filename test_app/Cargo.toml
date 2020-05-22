@@ -11,3 +11,4 @@ undefine_nfc_reader = { path = "../undefine_nfc_reader" }
 
 hidapi = ""
 tlv_parser = ""
+simple_logger = ""
