@@ -1,0 +1,17 @@
+{  
+        "version": "2.0.0",
+        "workingDirectory": "${workspaceFolder}",
+        "command": "cargo",
+        "args": ["build"],
+        "options": {
+            "cwd": "${workspaceFolder}"
+        },
+        "isShellCommand": true,
+        "showOutput": "always",
+        "tasks": [
+            { 
+                "taskName": "cargo build",
+                "suppressTaskName": true
+            }
+        ]
+}
