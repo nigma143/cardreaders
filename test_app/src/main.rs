@@ -16,9 +16,7 @@ fn main() {
     let frame_channel = HidFrameChannel::new(hidapi.open(0x1089, 0x0001).unwrap());
     let message_channel = MessageChannel::new(frame_channel);
 
-    let mut rq = Message::Get {
-        payload: vec![0xDF, 0x46, 0x00],
-    };
+    let mut rq = Message::Get(vec![0xDF, 0x46, 0x00]);
 
     message_channel.write(&mut rq).unwrap();
 
@@ -26,9 +24,9 @@ fn main() {
     let rs = message_channel.read().unwrap();
 
     let payload = match rs {
-        Message::Do { payload } => payload,
-        Message::Get { payload } => payload,
-        Message::Set { payload } => payload,
+        Message::Do(payload) => payload,
+        Message::Get(payload)  => payload,
+        Message::Set(payload)  => payload,
         _ => panic!(":dsfdsfdsf"),
     };
 
@@ -39,13 +37,9 @@ fn main() {
     let v: AsciiString = tlv.find_val_ext("FF01 / DF46").unwrap().unwrap();
     println!("{}", *v);
 
-    let n_tlv = Tlv::new(
+    let n_tlv = Tlv::new_with_childs(
         0xFF01,
-        Value::TlvList(vec![Tlv::new(
-            0x0C,
-            Value::Val(AsciiString::new("Hui".to_owned()).bytes()),
-        )
-        .unwrap()]),
+        vec![Tlv::new_with_val(0x0C, AsciiString::new("Hui".to_owned())).unwrap()],
     )
     .unwrap();
 

@@ -1,7 +1,6 @@
 use crate::error::*;
 use crate::message_channel::FrameChannel;
 
-use cancellation::{CancellationToken, OperationCanceled};
 use hidapi::{HidDevice, HidError};
 
 pub struct HidFrameChannel {
@@ -48,28 +47,20 @@ impl HidFrameChannel {
         Ok(())
     }
 
-    fn read_frame<F>(&self, ct: &CancellationToken, read: F) -> Result<Vec<u8>, ByteChannelError>
+    fn read_frame<F>(&self, read: F) -> Result<Vec<u8>, ByteChannelError>
     where
         F: Fn(&mut [u8]) -> Result<usize, ByteChannelError>,
     {
         let mut buf: [u8; 64] = [0; 64];
 
-        loop {
-            ct.result()?;
+        let r_count = read(&mut buf)?;
 
-            let r_count = read(&mut buf)?;
-            if r_count == 0 {
-                continue;
-            }
+        log::info!("read: {:02X?}", buf.to_vec());
 
-            log::info!("read: {:02X?}", buf.to_vec());
-
-            if r_count != buf.len() {
-                return Err(ByteChannelError::Other(format!(
-                    "head read size is incorrect"
-                )));
-            }
-            break;
+        if r_count != buf.len() {
+            return Err(ByteChannelError::Other(format!(
+                "head read size is incorrect"
+            )));
         }
 
         let m_len = buf[0] as usize;
@@ -79,23 +70,17 @@ impl HidFrameChannel {
 }
 
 impl FrameChannel for HidFrameChannel {
-    fn write(&self, frame: &[u8], ct: &CancellationToken) -> Result<(), ByteChannelError> {
+    fn write(&self, frame: &[u8]) -> Result<(), ByteChannelError> {
         Ok(self.write_frame(frame, |x| Ok(self.device.write(x)?))?)
     }
 
-    fn read(&self, ct: &CancellationToken) -> Result<Vec<u8>, ByteChannelError> {
-        Ok(self.read_frame(ct, |x| Ok(self.device.read(x)?))?)
+    fn read(&self) -> Result<Vec<u8>, ByteChannelError> {
+        Ok(self.read_frame(|x| Ok(self.device.read(x)?))?)
     }
 }
 
 impl From<HidError> for ByteChannelError {
     fn from(error: HidError) -> Self {
         ByteChannelError::Other(format!("{}", error))
-    }
-}
-
-impl From<OperationCanceled> for ByteChannelError {
-    fn from(error: OperationCanceled) -> Self {
-        ByteChannelError::OperationCanceled()
     }
 }

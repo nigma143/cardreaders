@@ -1,19 +1,18 @@
 use crate::error::{ByteChannelError, MessageChannelError};
 
 use byteorder::{BigEndian, ByteOrder};
-use cancellation::{CancellationToken, CancellationTokenSource};
 
 pub trait FrameChannel {
-    fn write(&self, frame: &[u8], ct: &CancellationToken) -> Result<(), ByteChannelError>;
-    fn read(&self, ct: &CancellationToken) -> Result<Vec<u8>, ByteChannelError>;
+    fn write(&self, frame: &[u8]) -> Result<(), ByteChannelError>;
+    fn read(&self) -> Result<Vec<u8>, ByteChannelError>;
 }
 
 pub enum Message {
     Ask,
-    Nack { code: u16 },
-    Do { payload: Vec<u8> },
-    Get { payload: Vec<u8> },
-    Set { payload: Vec<u8> },
+    Nack(u16),
+    Do(Vec<u8>),
+    Get(Vec<u8>),
+    Set(Vec<u8>),
 }
 
 pub struct MessageChannel<T>
@@ -28,39 +27,15 @@ where
     T: FrameChannel,
 {
     pub fn new(channel: T) -> Self {
-        MessageChannel { channel }
+        Self { channel }
     }
 
-    pub fn write(&self, m: &mut Message) -> Result<(), MessageChannelError> {
-        self.write_ct(m, &CancellationTokenSource::new())
-    }
-
-    pub fn write_ct(
-        &self,
-        m: &mut Message,
-        ct: &CancellationToken,
-    ) -> Result<(), MessageChannelError> {
-        self.write_impl(m, |x| self.channel.write(x, ct))?;
-        Ok(())
-    }
-
-    pub fn read(&self) -> Result<Message, MessageChannelError> {
-        self.read_ct(&CancellationTokenSource::new())
-    }
-
-    pub fn read_ct(&self, ct: &CancellationToken) -> Result<Message, MessageChannelError> {
-        self.read_impl(|| self.channel.read(ct))
-    }
-
-    fn write_impl<F>(&self, message: &mut Message, write: F) -> Result<(), MessageChannelError>
-    where
-        F: Fn(&[u8]) -> Result<(), ByteChannelError>,
-    {
+    pub fn write(&self, message: &Message) -> Result<(), MessageChannelError> {
         let payload_size = match message {
-            Message::Do { payload } => payload.len(),
-            Message::Get { payload } => payload.len(),
-            Message::Set { payload } => payload.len(),
-            _ => panic!("invalid message type"),
+            Message::Do(payload) => payload.len(),
+            Message::Get(payload) => payload.len(),
+            Message::Set(payload) => payload.len(),
+            _ => Err(MessageChannelError::InvalidRequestMessageType())?,
         };
         let raw_message_size = 1 + //STX
         1 + //Unit
@@ -75,38 +50,35 @@ where
         raw_message.push(0x00);
 
         match message {
-            Message::Do { ref mut payload } => {
+            Message::Do(payload) => {
                 raw_message.push(0x3E);
-                raw_message.append(payload);
+                raw_message.extend(payload.iter());
             }
-            Message::Get { ref mut payload } => {
+            Message::Get(payload) => {
                 raw_message.push(0x3D);
-                raw_message.append(payload);
+                raw_message.extend(payload.iter());
             }
-            Message::Set { ref mut payload } => {
+            Message::Set(payload) => {
                 raw_message.push(0x3C);
-                raw_message.append(payload);
+                raw_message.extend(payload.iter());
             }
-            _ => panic!("invalid message type"),
+            _ => Err(MessageChannelError::InvalidResponseMessageType())?,
         };
 
         raw_message.push(Self::calculate_lrc(&raw_message));
         raw_message.push(0x03);
 
-        write(&raw_message)?;
+        self.channel.write(&raw_message)?;
 
         Ok(())
     }
 
-    fn read_impl<F>(&self, read: F) -> Result<Message, MessageChannelError>
-    where
-        F: Fn() -> Result<Vec<u8>, ByteChannelError>,
-    {
+    pub fn read(&self) -> Result<Message, MessageChannelError> {
         let mut buf: Vec<u8> = Vec::new();
 
         while buf.len() < 6 {
             //STX + UNIT + OPCODE + LEN(1-3)
-            let mut readed = read()?;
+            let mut readed = self.channel.read()?;
             if readed.len() == 0 {
                 return Err(MessageChannelError::Other(format!(
                     "read head block size is 0"
@@ -126,7 +98,7 @@ where
             .ok_or(MessageChannelError::Other(format!("incorrect LEN")))?;
 
         while buf.len() < m_len as usize {
-            let mut readed = read()?;
+            let mut readed = self.channel.read()?;
             if readed.len() == 0 {
                 return Err(MessageChannelError::Other(format!(
                     "read body block size is 0"
@@ -153,21 +125,13 @@ where
         let payload = &buf[payload_index..lrc_index];
 
         match opcode {
-            0x15 => Ok(Message::Nack {
-                code: BigEndian::read_u16(&payload),
-            }),
-            0x3E => Ok(Message::Do {
-                payload: payload.to_vec(),
-            }),
+            0x15 => Ok(Message::Nack(BigEndian::read_u16(&payload))),
+            0x3E => Ok(Message::Do(payload.to_vec())),
             0x3D => Ok(match payload {
                 [0x00, 0x00] => Message::Ask,
-                _ => Message::Get {
-                    payload: payload.to_vec(),
-                },
+                _ => Message::Get(payload.to_vec())
             }),
-            0x3C => Ok(Message::Set {
-                payload: payload.to_vec(),
-            }),
+            0x3C => Ok(Message::Set(payload.to_vec())),
             _ => Err(MessageChannelError::Other(format!("inccorect OPCODE"))),
         }
     }

@@ -3,26 +3,46 @@ use crate::error::TlvValueParseError;
 use std::ops::{Deref, DerefMut};
 
 use tlv_parser::tlv::{Tlv, Value};
+
 pub trait TlvExtensions {
-    fn new_ext<T>(tag: usize, val: T) -> Result<Self, tlv_parser::TlvError>
+    fn new_with_val<T>(tag: usize, val: T) -> Result<Self, tlv_parser::TlvError>
     where
         T: TlvValue<T>,
         Self: Sized;
+
+    fn new_with_childs(tag: usize, val: Vec<Self>) -> Result<Self, tlv_parser::TlvError>
+    where
+        Self: Sized;
+
+    fn new_with_raw_val(tag: usize, val: Vec<u8>) -> Result<Self, tlv_parser::TlvError>
+    where
+        Self: Sized;
+
     fn find_val_ext<T>(&self, path: &str) -> Result<Option<T>, TlvValueParseError>
     where
         T: TlvValue<T>;
+
     fn val_ext<T>(&self) -> Result<T, TlvValueParseError>
     where
         T: TlvValue<T>;
 }
 
 impl TlvExtensions for Tlv {
-    fn new_ext<T>(tag: usize, val: T) -> Result<Self, tlv_parser::TlvError>
+    fn new_with_val<T>(tag: usize, val: T) -> Result<Self, tlv_parser::TlvError>
     where
         T: TlvValue<T>,
     {
         Tlv::new(tag, Value::Val(val.bytes()))
     }
+
+    fn new_with_childs(tag: usize, vals: Vec<Tlv>) -> Result<Self, tlv_parser::TlvError> {
+        Tlv::new(tag, Value::TlvList(vals))
+    }
+
+    fn new_with_raw_val(tag: usize, val: Vec<u8>) -> Result<Self, tlv_parser::TlvError> {
+        Tlv::new(tag, Value::Val(val))
+    }
+
     fn find_val_ext<T>(&self, path: &str) -> Result<Option<T>, TlvValueParseError>
     where
         T: TlvValue<T>,
@@ -36,6 +56,7 @@ impl TlvExtensions for Tlv {
             None => Ok(None),
         }
     }
+
     fn val_ext<T>(&self) -> Result<T, TlvValueParseError>
     where
         T: TlvValue<T>,
@@ -82,7 +103,7 @@ pub struct AsciiString {
 
 impl AsciiString {
     pub fn new(val: String) -> Self {
-        AsciiString { val }
+        Self { val: val }
     }
 }
 
