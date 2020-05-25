@@ -15,15 +15,16 @@ pub enum MessageChannelError {
     #[error("invalid message response type")]
     InvalidResponseMessageType(),
     #[error("{0}")]
-    Other(String)
+    Other(String),
 }
 
 #[derive(Error, Debug)]
 pub enum TlvChannelError {
     #[error("message channel error")]
-    MessageChannel(#[from] MessageChannelError)
+    MessageChannel(#[from] MessageChannelError),
+    #[error("tlv error: {0}")]
+    TlvError(String),
 }
-
 
 #[derive(Error, Debug)]
 pub enum TlvValueParseError {
@@ -31,4 +32,16 @@ pub enum TlvValueParseError {
     ManyValues,
     #[error("{0}")]
     Other(String),
+}
+
+impl From<tlv_parser::TlvError> for TlvChannelError {
+    fn from(error: tlv_parser::TlvError) -> Self {
+        TlvChannelError::TlvError(format!("{}", error))
+    }
+}
+
+impl From<TlvValueParseError> for TlvChannelError {
+    fn from(error: TlvValueParseError) -> Self {
+        TlvChannelError::TlvError(format!("{}", error))
+    }
 }

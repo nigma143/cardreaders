@@ -7,6 +7,7 @@ pub trait FrameChannel {
     fn read(&self) -> Result<Vec<u8>, ByteChannelError>;
 }
 
+#[derive(Debug, Clone)]
 pub enum Message {
     Ask,
     Nack(u16),
@@ -31,16 +32,16 @@ where
     }
 
     pub fn write(&self, message: &Message) -> Result<(), MessageChannelError> {
-        let payload_size = match message {
-            Message::Do(payload) => payload.len(),
-            Message::Get(payload) => payload.len(),
-            Message::Set(payload) => payload.len(),
+        let payload = match message {
+            Message::Do(payload) => payload,
+            Message::Get(payload) => payload,
+            Message::Set(payload) => payload,
             _ => Err(MessageChannelError::InvalidRequestMessageType())?,
         };
         let raw_message_size = 1 + //STX
         1 + //Unit
         1 + //Opcode
-        payload_size + //DATA
+        payload.len() + //DATA
         1 + //LRC
         1; //ETX
 
@@ -50,20 +51,13 @@ where
         raw_message.push(0x00);
 
         match message {
-            Message::Do(payload) => {
-                raw_message.push(0x3E);
-                raw_message.extend(payload.iter());
-            }
-            Message::Get(payload) => {
-                raw_message.push(0x3D);
-                raw_message.extend(payload.iter());
-            }
-            Message::Set(payload) => {
-                raw_message.push(0x3C);
-                raw_message.extend(payload.iter());
-            }
+            Message::Do(_) => raw_message.push(0x3E),
+            Message::Get(_) => raw_message.push(0x3D),
+            Message::Set(_) => raw_message.push(0x3C),
             _ => Err(MessageChannelError::InvalidResponseMessageType())?,
         };
+
+        raw_message.extend(payload.iter());
 
         raw_message.push(Self::calculate_lrc(&raw_message));
         raw_message.push(0x03);
@@ -129,7 +123,7 @@ where
             0x3E => Ok(Message::Do(payload.to_vec())),
             0x3D => Ok(match payload {
                 [0x00, 0x00] => Message::Ask,
-                _ => Message::Get(payload.to_vec())
+                _ => Message::Get(payload.to_vec()),
             }),
             0x3C => Ok(Message::Set(payload.to_vec())),
             _ => Err(MessageChannelError::Other(format!("inccorect OPCODE"))),

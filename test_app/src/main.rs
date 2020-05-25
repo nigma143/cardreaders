@@ -4,7 +4,8 @@ use hidapi::*;
 use tlv_parser::tlv::{Tlv, Value};
 use undefine_nfc_reader::frame_channel::HidFrameChannel;
 use undefine_nfc_reader::message_channel::{Message, MessageChannel};
-use undefine_nfc_reader::tlv::{display_tlv, AsciiString, TlvExtensions, TlvValue};
+use undefine_nfc_reader::tlv::{AsciiString, TlvExtensions, TlvDecorator};
+use undefine_nfc_reader::tlv_channel::{ReadTlv, TlvChannel, WriteTlv};
 
 fn main() {
     simple_logger::init().unwrap();
@@ -15,36 +16,25 @@ fn main() {
 
     let frame_channel = HidFrameChannel::new(hidapi.open(0x1089, 0x0001).unwrap());
     let message_channel = MessageChannel::new(frame_channel);
+    let tlv_channel = TlvChannel::new(message_channel);
 
-    let mut rq = Message::Get(vec![0xDF, 0x46, 0x00]);
+    tlv_channel
+        .write(&WriteTlv::Get(
+            Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap(),
+        ))
+        .unwrap();
 
-    message_channel.write(&mut rq).unwrap();
+    let rs = tlv_channel.read().unwrap();
+    println!("{}", rs);
 
-    let rsAsk = message_channel.read().unwrap();
-    let rs = message_channel.read().unwrap();
+    let rs = tlv_channel.read().unwrap();
+    println!("{}", rs);
 
-    let payload = match rs {
-        Message::Do(payload) => payload,
-        Message::Get(payload)  => payload,
-        Message::Set(payload)  => payload,
-        _ => panic!(":dsfdsfdsf"),
-    };
-
-    let tlv = Tlv::from_vec(&payload).unwrap();
-
-    println!("{}", display_tlv(&tlv));
-
-    let v: AsciiString = tlv.find_val_ext("FF01 / DF46").unwrap().unwrap();
-    println!("{}", *v);
-
-    let n_tlv = Tlv::new_with_childs(
-        0xFF01,
-        vec![Tlv::new_with_val(0x0C, AsciiString::new("Hui".to_owned())).unwrap()],
-    )
-    .unwrap();
-
-    println!("{}", display_tlv(&n_tlv));
-
-    let v: AsciiString = n_tlv.find_val_ext("FF01 / 0C").unwrap().unwrap();
-    println!("{}", *v);
+    let t1 = Tlv::new_with_raw_val(0xDF01, vec![0x00]).unwrap();
+    
+    let t2 = Tlv::new_with_childs(0xFF02, vec![t1]).unwrap();
+        
+    let t3 = Tlv::new_with_childs(0xFF03, vec![t2]).unwrap();
+    
+    println!("{}", TlvDecorator::new(&t3));
 }
