@@ -1,9 +1,14 @@
-use crate::error::*;
-use crate::message_channel::{FrameChannel, Message, MessageChannel};
-use crate::tlv::{TlvDecorator, AsciiString, TlvExtensions};
+use crate::error;
+use crate::message_channel;
+use crate::tlv;
 
 use std::fmt;
+
 use tlv_parser::tlv::{Tlv, Value};
+
+use error::*;
+use message_channel::{FrameChannel, Message, MessageChannel};
+use tlv::{AsciiString, TlvDecorator, TlvExtensions};
 
 pub enum WriteTlv {
     Do(Tlv),

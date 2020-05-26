@@ -1,10 +1,12 @@
-use crate::error::TlvValueParseError;
+use crate::error;
 
 use std::fmt;
 use std::ops::{Deref, DerefMut};
 
 use tlv_parser::tlv::{Tlv, Value};
 use tlv_parser::TlvError;
+
+use error::*;
 
 pub struct TlvDecorator<'a> {
     tlv: &'a Tlv,
@@ -35,17 +37,17 @@ impl<'a> fmt::Debug for TlvDecorator<'a> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut builder = f.debug_struct("Tlv");
         builder.field("tag", &self.tlv.tag());
-        
+
         match self.tlv.val() {
             Value::TlvList(childs) => {
                 let tlv_vec = &childs
                     .iter()
                     .map(|x| TlvDecorator::new(x))
-                    .collect::<Vec<TlvDecorator>>();                    
+                    .collect::<Vec<TlvDecorator>>();
                 builder.field("val", &tlv_vec);
             }
             Value::Val(val) => {
-                builder.field("val", val);                
+                builder.field("val", val);
             }
             Value::Nothing => {}
         }
@@ -126,8 +128,6 @@ impl TlvExtensions for Tlv {
         }
     }
 }
-
-
 
 pub trait TlvValue<T> {
     fn from_raw(raw: &[u8]) -> Result<Self, TlvValueParseError>

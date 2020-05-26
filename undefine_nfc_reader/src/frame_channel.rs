@@ -1,7 +1,10 @@
-use crate::error::*;
-use crate::message_channel::FrameChannel;
+use crate::error;
+use crate::message_channel;
 
 use hidapi::{HidDevice, HidError};
+
+use error::*;
+use message_channel::FrameChannel;
 
 pub struct HidFrameChannel {
     device: HidDevice,

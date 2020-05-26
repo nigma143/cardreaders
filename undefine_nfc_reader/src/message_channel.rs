@@ -1,6 +1,8 @@
-use crate::error::{ByteChannelError, MessageChannelError};
+use crate::error;
 
 use byteorder::{BigEndian, ByteOrder};
+
+use error::*;
 
 pub trait FrameChannel {
     fn write(&self, frame: &[u8]) -> Result<(), ByteChannelError>;
