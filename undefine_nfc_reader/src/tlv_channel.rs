@@ -22,6 +22,50 @@ pub enum ReadTlv {
     Tlv(Tlv),
 }
 
+impl fmt::Debug for WriteTlv {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            WriteTlv::Do(tlv) => f
+                .debug_struct("{Do}Tlv")
+                .field("val", &TlvDecorator::new(tlv))
+                .finish(),
+            WriteTlv::Get(tlv) => f
+                .debug_struct("(Get)Tlv")
+                .field("val", &TlvDecorator::new(tlv))
+                .finish(),
+            WriteTlv::Set(tlv) => f
+                .debug_struct("(Set)Tlv")
+                .field("val", &TlvDecorator::new(tlv))
+                .finish(),
+        }
+    }
+}
+
+impl fmt::Display for WriteTlv {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            WriteTlv::Do(tlv) => {
+                write!(f, "(Do)Tlv(")?;
+                writeln!(f)?;
+                fmt::Display::fmt(&TlvDecorator::new(tlv), f)?;
+                write!(f, ")")
+            }
+            WriteTlv::Get(tlv) => {
+                write!(f, "(Get)Tlv(")?;
+                writeln!(f)?;
+                fmt::Display::fmt(&TlvDecorator::new(tlv), f)?;
+                write!(f, ")")
+            }
+            WriteTlv::Set(tlv) => {
+                write!(f, "(Set)Tlv(")?;
+                writeln!(f)?;
+                fmt::Display::fmt(&TlvDecorator::new(tlv), f)?;
+                write!(f, ")")
+            }
+        }
+    }
+}
+
 impl fmt::Debug for ReadTlv {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
@@ -66,6 +110,8 @@ where
     }
 
     pub fn write(&self, data: &WriteTlv) -> Result<(), TlvChannelError> {
+        log::info!("write {}", data);
+
         let message = match data {
             WriteTlv::Do(tlv) => Message::Do(tlv.to_vec()),
             WriteTlv::Get(tlv) => Message::Get(tlv.to_vec()),
@@ -78,7 +124,7 @@ where
     pub fn read(&self) -> Result<ReadTlv, TlvChannelError> {
         let message = self.channel.read()?;
 
-        match message {
+        let result = match message {
             Message::Ask => Ok(ReadTlv::Ack),
             Message::Nack(code) => Ok(ReadTlv::Nack(code)),
             Message::Do(payload) => {
@@ -111,6 +157,13 @@ where
             }
             Message::Get(payload) => Ok(ReadTlv::Tlv(Tlv::from_vec(&payload)?)),
             Message::Set(payload) => Ok(ReadTlv::Tlv(Tlv::from_vec(&payload)?)),
+        };
+
+        match &result {
+            Ok(o) => log::info!("read {}", o),
+            Err(e) => log::info!("error on read: {:?}", e),
         }
+
+        result
     }
 }

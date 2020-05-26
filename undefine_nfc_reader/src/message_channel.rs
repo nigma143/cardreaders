@@ -38,7 +38,7 @@ where
             Message::Do(payload) => payload,
             Message::Get(payload) => payload,
             Message::Set(payload) => payload,
-            _ => Err(MessageChannelError::InvalidRequestMessageType())?,
+            _ => Err(MessageChannelError::InvalidRequestMessageType)?,
         };
         let raw_message_size = 1 + //STX
         1 + //Unit
@@ -56,7 +56,7 @@ where
             Message::Do(_) => raw_message.push(0x3E),
             Message::Get(_) => raw_message.push(0x3D),
             Message::Set(_) => raw_message.push(0x3C),
-            _ => Err(MessageChannelError::InvalidResponseMessageType())?,
+            _ => Err(MessageChannelError::InvalidResponseMessageType)?,
         };
 
         raw_message.extend(payload.iter());

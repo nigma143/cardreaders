@@ -1,4 +1,4 @@
-use std::sync::mpsc::RecvTimeoutError;
+use std::sync::mpsc::{RecvTimeoutError, SendError};
 
 use thiserror::Error;
 
@@ -13,9 +13,9 @@ pub enum MessageChannelError {
     #[error("byte channel error")]
     ByteChannel(#[from] ByteChannelError),
     #[error("invalid message request type")]
-    InvalidRequestMessageType(),
+    InvalidRequestMessageType,
     #[error("invalid message response type")]
-    InvalidResponseMessageType(),
+    InvalidResponseMessageType,
     #[error("{0}")]
     Other(String),
 }
@@ -32,8 +32,10 @@ pub enum TlvChannelError {
 pub enum TlvQueueError {
     #[error("tlv channel error: {0}")]
     TlvChannel(#[from] TlvChannelError),
-    #[error("receive timeout error: {0}")]
-    RecvTimeout(#[from] RecvTimeoutError),
+    #[error("tlv handler channel is disconnected")]
+    Disconnected,
+    #[error("timeout")]
+    Timout,
     #[error("put error. return code: {0}")]
     PutError(u16),
 }
@@ -58,5 +60,14 @@ impl From<tlv_parser::TlvError> for TlvChannelError {
 impl From<TlvValueParseError> for TlvChannelError {
     fn from(error: TlvValueParseError) -> Self {
         TlvChannelError::TlvError(format!("{}", error))
+    }
+}
+
+impl From<RecvTimeoutError> for TlvQueueError {
+    fn from(error: RecvTimeoutError) -> Self {
+        match error {
+            RecvTimeoutError::Timeout => TlvQueueError::Timout,
+            RecvTimeoutError::Disconnected => TlvQueueError::Disconnected,
+        }
     }
 }

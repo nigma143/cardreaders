@@ -6,29 +6,25 @@ use undefine_nfc_reader::frame_channel::HidFrameChannel;
 use undefine_nfc_reader::message_channel::{Message, MessageChannel};
 use undefine_nfc_reader::tlv::{AsciiString, TlvDecorator, TlvExtensions};
 use undefine_nfc_reader::tlv_channel::{ReadTlv, TlvChannel, WriteTlv};
-use undefine_nfc_reader::tlv_queue::TlvQueue;
+use undefine_nfc_reader::tlv_handler::TlvHandler;
 
 fn main() {
     simple_logger::init().unwrap();
 
     let hidapi = HidApi::new().unwrap();
     let device = hidapi.open(0x1089, 0x0001).unwrap();
-    device.set_blocking_mode(false).unwrap();
 
-    let frame_channel = HidFrameChannel::new(hidapi.open(0x1089, 0x0001).unwrap());
-    let message_channel = MessageChannel::new(frame_channel);
-    let tlv_channel = TlvChannel::new(message_channel);
-    let tlv_queue = TlvQueue::new(tlv_channel);
+    let tlv_queue = TlvHandler::new_from_frame_channel(HidFrameChannel::new(
+        hidapi.open(0x1089, 0x0001).unwrap(),
+    ));
 
-    let m = WriteTlv::Get(Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap());
+    let m = Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap();
 
-    tlv_queue.put(m).unwrap();
+    tlv_queue.request_get(m).unwrap();
 
     let rs = tlv_queue
-        .get(|x| true, std::time::Duration::from_millis(500))
+        .response(|x| true, std::time::Duration::from_millis(500))
         .unwrap();
-
-    println!("{}", rs);
 
     drop(tlv_queue);
 
