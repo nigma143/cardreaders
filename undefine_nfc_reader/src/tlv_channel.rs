@@ -18,7 +18,7 @@ pub enum WriteTlv {
 
 pub enum ReadTlv {
     Ack,
-    Nack(u16),
+    Nack(u8),
     Tlv(Tlv),
 }
 

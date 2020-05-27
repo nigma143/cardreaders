@@ -1,5 +1,7 @@
 use crate::error;
 
+use std::sync::RwLock;
+
 use byteorder::{BigEndian, ByteOrder};
 
 use error::*;
@@ -12,7 +14,7 @@ pub trait FrameChannel {
 #[derive(Debug, Clone)]
 pub enum Message {
     Ask,
-    Nack(u16),
+    Nack(u8),
     Do(Vec<u8>),
     Get(Vec<u8>),
     Set(Vec<u8>),
@@ -22,7 +24,7 @@ pub struct MessageChannel<T>
 where
     T: FrameChannel,
 {
-    channel: T,
+    channel: RwLock<T>,
 }
 
 impl<T> MessageChannel<T>
@@ -30,7 +32,9 @@ where
     T: FrameChannel,
 {
     pub fn new(channel: T) -> Self {
-        Self { channel }
+        Self { 
+            channel: RwLock::new(channel) 
+        }
     }
 
     pub fn write(&self, message: &Message) -> Result<(), MessageChannelError> {
@@ -64,17 +68,19 @@ where
         raw_message.push(Self::calculate_lrc(&raw_message));
         raw_message.push(0x03);
 
-        self.channel.write(&raw_message)?;
+        self.channel.write().unwrap().write(&raw_message)?;
 
         Ok(())
     }
 
     pub fn read(&self) -> Result<Message, MessageChannelError> {
+        let channel = self.channel.read().unwrap();
+       
         let mut buf: Vec<u8> = Vec::new();
 
         while buf.len() < 6 {
             //STX + UNIT + OPCODE + LEN(1-3)
-            let mut readed = self.channel.read()?;
+            let mut readed = channel.read()?;
             if readed.len() == 0 {
                 return Err(MessageChannelError::Other(format!(
                     "read head block size is 0"
@@ -94,7 +100,7 @@ where
             .ok_or(MessageChannelError::Other(format!("incorrect LEN")))?;
 
         while buf.len() < m_len as usize {
-            let mut readed = self.channel.read()?;
+            let mut readed = channel.read()?;
             if readed.len() == 0 {
                 return Err(MessageChannelError::Other(format!(
                     "read body block size is 0"
@@ -121,7 +127,7 @@ where
         let payload = &buf[payload_index..lrc_index];
 
         match opcode {
-            0x15 => Ok(Message::Nack(BigEndian::read_u16(&payload))),
+            0x15 => Ok(Message::Nack(payload[0])),
             0x3E => Ok(Message::Do(payload.to_vec())),
             0x3D => Ok(match payload {
                 [0x00, 0x00] => Message::Ask,

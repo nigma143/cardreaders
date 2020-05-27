@@ -1,24 +1,29 @@
 use crate::error;
 use crate::message_channel;
 
+use std::sync::RwLock;
+
 use hidapi::{HidDevice, HidError};
 
 use error::*;
 use message_channel::FrameChannel;
 
+unsafe impl Sync for HidFrameChannel {}
+
 pub struct HidFrameChannel {
-    device: HidDevice,
+    device: RwLock<HidDevice>,
 }
 
 impl HidFrameChannel {
     pub fn new(device: HidDevice) -> Self {
-        HidFrameChannel { device }
-    }
+        HidFrameChannel {
+            device: RwLock::new(device),
+        }
+    }        
+}
 
-    fn write_frame<F>(&self, frame: &[u8], write: F) -> Result<(), ByteChannelError>
-    where
-        F: Fn(&[u8]) -> Result<usize, ByteChannelError>,
-    {
+impl FrameChannel for HidFrameChannel {
+    fn write(&self, frame: &[u8]) -> Result<(), ByteChannelError> {
         let chunks: Vec<&[u8]> = frame.chunks(63).collect();
 
         for i in 0..chunks.len() {
@@ -39,7 +44,7 @@ impl HidFrameChannel {
 
             log::info!("write: {:02X?}", frame);
 
-            let w_count = write(&frame)?;
+            let w_count = self.device.write().unwrap().write(&frame)?;
             if w_count != frame.len() {
                 return Err(ByteChannelError::Other(format!(
                     "incorrect write byte count"
@@ -50,13 +55,10 @@ impl HidFrameChannel {
         Ok(())
     }
 
-    fn read_frame<F>(&self, read: F) -> Result<Vec<u8>, ByteChannelError>
-    where
-        F: Fn(&mut [u8]) -> Result<usize, ByteChannelError>,
-    {
+    fn read(&self) -> Result<Vec<u8>, ByteChannelError> {
         let mut buf: [u8; 64] = [0; 64];
 
-        let r_count = read(&mut buf)?;
+        let r_count = self.device.read().unwrap().read(&mut buf)?;
 
         log::info!("read: {:02X?}", buf.to_vec());
 
@@ -69,16 +71,6 @@ impl HidFrameChannel {
         let m_len = buf[0] as usize;
 
         Ok(buf[1..(m_len + 1)].to_vec())
-    }
-}
-
-impl FrameChannel for HidFrameChannel {
-    fn write(&self, frame: &[u8]) -> Result<(), ByteChannelError> {
-        Ok(self.write_frame(frame, |x| Ok(self.device.write(x)?))?)
-    }
-
-    fn read(&self) -> Result<Vec<u8>, ByteChannelError> {
-        Ok(self.read_frame(|x| Ok(self.device.read(x)?))?)
     }
 }
 

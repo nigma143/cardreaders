@@ -1,4 +1,6 @@
 use std::ops::{Deref, DerefMut};
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 use hidapi::*;
 use tlv_parser::tlv::{Tlv, Value};
@@ -14,20 +16,37 @@ fn main() {
     let hidapi = HidApi::new().unwrap();
     let device = hidapi.open(0x1089, 0x0001).unwrap();
 
-    let tlv_queue = TlvHandler::new_from_frame_channel(HidFrameChannel::new(
+    let h = TlvHandler::new_from_frame_channel(HidFrameChannel::new(
         hidapi.open(0x1089, 0x0001).unwrap(),
     ));
+    /*
+        let m = Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap();
 
-    let m = Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap();
+        h.request_get(m).unwrap();
 
-    tlv_queue.request_get(m).unwrap();
+        let rs = h
+            .response(|x| true, std::time::Duration::from_millis(500))
+            .unwrap();
+    */
+    //let r = undefine_nfc_reader::tlv_handler::get_serial(&h);
+println!("----------------------------");
+    let h = Arc::new(h);
 
-    let rs = tlv_queue
-        .response(|x| true, std::time::Duration::from_millis(500))
-        .unwrap();
+    for i in 0..2 {
+        let s_h = h.clone();
+        thread::spawn(move || {
+            let m = Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap();
 
-    drop(tlv_queue);
+            s_h.request_get(m).unwrap();
 
+            let rs = s_h
+                .response(|x| true, std::time::Duration::from_millis(500))
+                .unwrap();
+        });
+    }
+
+    //drop(tlv_queue);
+    thread::sleep(std::time::Duration::from_millis(5000));
     println!("dsfsd");
 
     /*tlv_channel

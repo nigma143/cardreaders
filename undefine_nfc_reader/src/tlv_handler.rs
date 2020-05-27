@@ -2,31 +2,47 @@ use crate::error;
 use crate::message_channel;
 use crate::tlv_channel;
 
-use std::collections::VecDeque;
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, SendError, Sender};
-use std::sync::{Arc, Mutex};
+use std::sync::mpsc::{channel, Receiver, SendError, Sender};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
-use tlv_parser::tlv::Tlv;
+use tlv_parser::tlv::{Tlv, Value};
 
 use error::*;
 use message_channel::{FrameChannel, MessageChannel};
 use tlv_channel::{ReadTlv, TlvChannel, WriteTlv};
+/*
+pub fn get_serial(common_handler: &TlvHandler) -> Tlv {
+    let handler = common_handler.create_handler_scope(Box::new(|x| contains(x, &[0xDF4D])));
 
-pub struct SmartTlvHandler<'a> {
-    handler: &'a TlvHandler,
-    match_fn: Arc<Box<Fn(&Tlv) -> bool + 'static>>,
+    handler.request_get(Tlv::new(0xDF4D, Value::Nothing).unwrap()).unwrap();
+    handler.response(Duration::from_millis(1000)).unwrap()
 }
 
-impl<'a> SmartTlvHandler<'a> {
-    pub fn new<F>(handler: &'a TlvHandler, match_fn: F) -> Self
-    where
-        F: Fn(&Tlv) -> bool + 'static,
-    {
+fn contains(tlv: &Tlv, tags: &[usize]) -> bool {
+    match tlv.val() {
+        tlv_parser::tlv::Value::TlvList(childs) => {
+            match childs.iter().find(|x| tags.contains(&x.tag())) {
+                Some(_) => true,
+                None => false
+            }
+        }
+        tlv_parser::tlv::Value::Val(_) => false,
+        tlv_parser::tlv::Value::Nothing => false
+    }
+}
+
+pub struct TlvHandlerScope<'a> {
+    handler: &'a TlvHandler,
+    match_fn: Box<dyn Fn(&Tlv) -> bool + Send>,
+}
+
+impl<'a> TlvHandlerScope<'a> {
+    pub fn new(handler: &'a TlvHandler, match_fn: Box<dyn Fn(&Tlv) -> bool + Send>) -> Self {
         Self {
             handler: handler,
-            match_fn: Arc::new(Box::new(match_fn)),
+            match_fn: match_fn,
         }
     }
 
@@ -41,33 +57,46 @@ impl<'a> SmartTlvHandler<'a> {
     pub fn request_set(&self, tlv: Tlv) -> Result<(), TlvQueueError> {
         self.handler.request_set(tlv)
     }
-/*
+
     pub fn response(&self, timeout: Duration) -> Result<Tlv, TlvQueueError> {
-        self.handler.response(self.match_fn.clone()., timeout)
-    }*/
+        self.handler.response(self.match_fn, timeout)
+    }
+}
+*/
+pub struct TlvHandler<TFrameChannel>
+where
+    TFrameChannel: FrameChannel + Send + 'static,
+{
+    tlv_channel: Arc<TlvChannel<TFrameChannel>>,
+    sender: Mutex<Sender<ReadRegistration>>,
 }
 
-pub struct TlvHandler {
-    sender: Sender<Registration>,
-}
-
-impl TlvHandler {
-    pub fn new_from_frame_channel<TFrameChannel>(frame_channel: TFrameChannel) -> Self
+impl<TFrameChannel> TlvHandler<TFrameChannel>
+where
+    TFrameChannel: FrameChannel + Send + Sync + 'static,
+{
+    pub fn new_from_frame_channel(frame_channel: TFrameChannel) -> Self
     where
         TFrameChannel: FrameChannel + Send + 'static,
     {
         TlvHandler::new(TlvChannel::new(MessageChannel::new(frame_channel)))
     }
 
-    pub fn new<TFrameChannel>(tlv_channel: TlvChannel<TFrameChannel>) -> Self
+    pub fn new(tlv_channel: TlvChannel<TFrameChannel>) -> Self
     where
         TFrameChannel: FrameChannel + Send + 'static,
     {
+        let shared_tlv_ch = Arc::new(tlv_channel);
+
+        let read_handler_tlv_ch = shared_tlv_ch.clone();
         let (sender, receiver) = channel();
 
-        thread::spawn(|| TlvHandler::run_tlv_handler(tlv_channel, receiver));
+        thread::spawn(|| TlvHandler::run_read_handler(read_handler_tlv_ch, receiver));
 
-        Self { sender: sender }
+        Self {
+            tlv_channel: shared_tlv_ch.clone(),
+            sender: Mutex::new(sender),
+        }
     }
 
     pub fn request_do(&self, tlv: Tlv) -> Result<(), TlvQueueError> {
@@ -82,10 +111,13 @@ impl TlvHandler {
         self.request(WriteTlv::Set(tlv))
     }
 
-    fn request(&self, data: WriteTlv) -> Result<(), TlvQueueError> {
+    fn request(&self, data: WriteTlv) -> Result<(), TlvQueueError> {        
+        self.tlv_channel.write(&data)?;
         let (sender, receiver) = channel();
         self.sender
-            .send(Registration::Write(WriteRegistration::new(sender, data)))
+            .lock()
+            .unwrap()
+            .send(ReadRegistration::Ack(ReadAckRegistration::new(sender)))
             .map_err(|_| TlvQueueError::Disconnected)?;
         let result = receiver.recv_timeout(Duration::from_millis(300))?;
         match result {
@@ -94,20 +126,29 @@ impl TlvHandler {
         }
     }
 
-    pub fn response<F>(&self, match_fn: F, timeout: Duration) -> Result<Tlv, TlvQueueError>
-    where
-        F: Fn(&Tlv) -> bool + Send + 'static,
-    {
+    pub fn response(
+        &self,
+        match_fn: impl Fn(&Tlv) -> bool + Send + 'static,
+        timeout: Duration,
+    ) -> Result<Tlv, TlvQueueError> {
         let (sender, receiver) = channel();
         self.sender
-            .send(Registration::Read(ReadRegistration::new(sender, match_fn)))
+            .lock()
+            .unwrap()
+            .send(ReadRegistration::Tlv(ReadTlvRegistration::new(
+                sender, match_fn,
+            )))
             .map_err(|_| TlvQueueError::Disconnected)?;
         Ok(receiver.recv_timeout(timeout)?)
     }
-
-    fn run_tlv_handler<TFrameChannel>(
-        tlv_channel: TlvChannel<TFrameChannel>,
-        receiver: Receiver<Registration>,
+    /*
+        pub fn create_handler_scope(&self, match_fn: Box<dyn Fn(&Tlv) -> bool + Send>) -> TlvHandlerScope {
+            TlvHandlerScope::new(self, match_fn)
+        }
+    */
+    fn run_read_handler(
+        tlv_channel: Arc<TlvChannel<TFrameChannel>>,
+        receiver: Receiver<ReadRegistration>,
     ) -> ()
     where
         TFrameChannel: FrameChannel,
@@ -118,20 +159,8 @@ impl TlvHandler {
         loop {
             match receiver.recv() {
                 Ok(reg) => match reg {
-                    Registration::Write(w_reg) => {
-                        match tlv_channel.write(&w_reg.get_write_data()) {
-                            Ok(_) => {
-                                ack_awaiters.push(w_reg);
-                            }
-                            Err(e) => {
-                                log::error!("error on write to tlv channel: {:?}", e);
-                                break;
-                            }
-                        }
-                    }
-                    Registration::Read(r_reg) => {
-                        awaiters.push(r_reg);
-                    }
+                    ReadRegistration::Ack(r_reg) => ack_awaiters.push(r_reg),
+                    ReadRegistration::Tlv(r_reg) => awaiters.push(r_reg),
                 },
                 Err(_) => {
                     log::trace!("sending channel disconnected");
@@ -205,41 +234,31 @@ impl TlvHandler {
     }
 }
 
-enum Registration {
-    Write(WriteRegistration),
-    Read(ReadRegistration),
+enum ReadRegistration {
+    Ack(ReadAckRegistration),
+    Tlv(ReadTlvRegistration),
 }
 
-struct WriteRegistration {
-    sender: Sender<Result<(), u16>>,
-    write_data: WriteTlv,
+struct ReadAckRegistration {
+    sender: Sender<Result<(), u8>>,
 }
 
-impl WriteRegistration {
-    fn new(sender: Sender<Result<(), u16>>, data: WriteTlv) -> Self {
-        Self {
-            sender: sender,
-            write_data: data,
-        }
+impl ReadAckRegistration {
+    fn new(sender: Sender<Result<(), u8>>) -> Self {
+        Self { sender }
     }
-    fn get_write_data(&self) -> &WriteTlv {
-        &self.write_data
-    }
-    fn finish(&self, result: Result<(), u16>) -> Result<(), SendError<Result<(), u16>>> {
+    fn finish(&self, result: Result<(), u8>) -> Result<(), SendError<Result<(), u8>>> {
         self.sender.send(result)
     }
 }
 
-struct ReadRegistration {
+struct ReadTlvRegistration {
     sender: Sender<Tlv>,
-    match_fn: Box<dyn Fn(&Tlv) -> bool + Send + 'static>,
+    match_fn: Box<dyn Fn(&Tlv) -> bool + Send>,
 }
 
-impl ReadRegistration {
-    fn new<F>(sender: Sender<Tlv>, match_fn: F) -> Self
-    where
-        F: Fn(&Tlv) -> bool + Send + 'static,
-    {
+impl ReadTlvRegistration {
+    fn new(sender: Sender<Tlv>, match_fn: impl Fn(&Tlv) -> bool + Send + 'static) -> Self {
         Self {
             sender: sender,
             match_fn: Box::new(match_fn),

@@ -37,7 +37,7 @@ pub enum TlvQueueError {
     #[error("timeout")]
     Timout,
     #[error("put error. return code: {0}")]
-    PutError(u16),
+    PutError(u8),
 }
 
 #[derive(Error, Debug)]
