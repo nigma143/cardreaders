@@ -2,5 +2,5 @@
 
 members = [
     "test_app",
-    "undefine_nfc_reader"
+    "uno8_nfc_reader",
 ]

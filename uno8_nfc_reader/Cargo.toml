@@ -1,5 +1,5 @@
 [package]
-name = "undefine_nfc_reader"
+name = "uno8_nfc_reader"
 version = "0.1.0"
 authors = ["И <nigma143@mail.ru>"]
 edition = "2018"
@@ -10,6 +10,5 @@ edition = "2018"
 hidapi = ""
 cancellation = ""
 thiserror = ""
-tlv_parser = ""
-byteorder = ""
 log = ""
+byteorder = ""
