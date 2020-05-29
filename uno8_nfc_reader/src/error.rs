@@ -2,7 +2,7 @@ use crate::tlv_parser;
 
 use cancellation::OperationCanceled;
 use thiserror::Error;
-use tlv_parser::TlvError;
+use tlv_parser::{Tlv, TlvError};
 
 #[derive(Error, Debug)]
 pub enum DeviceError {
@@ -10,6 +10,8 @@ pub enum DeviceError {
     OperationCanceled,
     #[error("message channel error: {0}")]
     MessageChannel(String),
+    #[error("TLV content error: {0}")]
+    TlvContent(String, Tlv),
     #[error("{0}")]
     Other(String),
 }

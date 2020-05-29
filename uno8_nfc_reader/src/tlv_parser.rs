@@ -33,14 +33,72 @@ pub enum TlvError {
 
     #[error("Provided 'tag-path' have error")]
     TagPathError,
+
+    #[error("Tag value parse error: {0}")]
+    ParseTagValue(String),
 }
 
+#[derive(Debug)]
 pub enum Value {
     TlvList(Vec<Tlv>),
     Val(Vec<u8>),
     Nothing,
 }
 
+impl Value {
+    /// Returns size of value in bytes
+    fn len(&self) -> usize {
+        match *self {
+            Value::TlvList(ref list) => list.iter().fold(0, |sum, x| sum + x.len()),
+            Value::Val(ref v) => v.len(),
+            Value::Nothing => 0,
+        }
+    }
+
+    /// Returns true if Value is empty (len() == 0)
+    pub fn is_empty(&self) -> bool {
+        match *self {
+            Value::TlvList(ref list) => list.is_empty(),
+            Value::Val(ref v) => v.is_empty(),
+            Value::Nothing => true,
+        }
+    }
+
+    /// Returns bytes array that represents encoded-len
+    ///
+    /// Note: implements only definite form
+    pub fn encode_len(&self) -> Vec<u8> {
+        let len = self.len();
+        if len <= 0x7f {
+            return vec![len as u8];
+        }
+
+        let mut out: Vec<u8> = len
+            .to_be_bytes()
+            .iter()
+            .skip_while(|&x| *x == 0)
+            .cloned()
+            .collect();
+
+        let bytes = out.len() as u8;
+        out.insert(0, 0x80 | bytes);
+        out
+    }
+}
+
+pub trait TagValue {
+    type Value;
+
+    fn new(val: Self::Value) -> Self;
+
+    fn from_raw(raw: Vec<u8>) -> Result<Self, TlvError>
+    where
+        Self: Sized;
+
+    fn bytes(&self) -> Vec<u8>;
+}
+
+#[derive(Debug)]
 pub struct Tlv {
     tag: Tag,
     val: Value,
@@ -373,44 +431,19 @@ impl Tlv {
     }
 }
 
-impl Value {
-    /// Returns size of value in bytes
-    fn len(&self) -> usize {
-        match *self {
-            Value::TlvList(ref list) => list.iter().fold(0, |sum, x| sum + x.len()),
-            Value::Val(ref v) => v.len(),
-            Value::Nothing => 0,
-        }
+impl Tlv {
+    pub fn new_spec(tag: usize, value: impl TagValue) -> Result<Self, TlvError> {
+        Tlv::new(tag, Value::Val(value.bytes()))
     }
 
-    /// Returns true if Value is empty (len() == 0)
-    pub fn is_empty(&self) -> bool {
-        match *self {
-            Value::TlvList(ref list) => list.is_empty(),
-            Value::Val(ref v) => v.is_empty(),
-            Value::Nothing => true,
+    pub fn child(&self, tag: usize) -> Result<&Self, TlvError> {
+        match self.val() {
+            Value::TlvList(childs) => match childs.iter().find(|x| x.tag == tag) {
+                Some(tlv) => Ok(tlv),
+                None => Err(TlvError::TagPathError),
+            },
+            _ => Err(TlvError::TlvListExpected { tag_number: tag }),
         }
-    }
-
-    /// Returns bytes array that represents encoded-len
-    ///
-    /// Note: implements only definite form
-    pub fn encode_len(&self) -> Vec<u8> {
-        let len = self.len();
-        if len <= 0x7f {
-            return vec![len as u8];
-        }
-
-        let mut out: Vec<u8> = len
-            .to_be_bytes()
-            .iter()
-            .skip_while(|&x| *x == 0)
-            .cloned()
-            .collect();
-
-        let bytes = out.len() as u8;
-        out.insert(0, 0x80 | bytes);
-        out
     }
 }
 

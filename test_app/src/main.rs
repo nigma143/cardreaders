@@ -12,17 +12,34 @@ use undefine_nfc_reader::tlv_handler::TlvHandler;*/
 
 use cancellation::{CancellationTokenSource, OperationCanceled};
 
-use uno8_nfc_reader::tlv_parser::{Tlv, Value};
 use uno8_nfc_reader::device::Uno8NfcDevice;
 use uno8_nfc_reader::device_builder::Uno8NfcDeviceBuilder;
 use uno8_nfc_reader::message_channel::{MessageChannel, ReadMessage, WriteMessage};
+use uno8_nfc_reader::tlv_parser::{Tlv, Value, TagValue};
+use uno8_nfc_reader::tag_value::IntTagValue;
 
 fn main() {
+    let n = 123456;
+    let sa = IntTagValue::new((n, 10));
+    println!("{:?}", sa.bytes());
+
+    let bs = sa.bytes();
+
+    let dd1 = IntTagValue::from_raw(bs).unwrap();
+
+    println!("{:?}", *dd1);
+
     simple_logger::init().unwrap();
 
     let device = Uno8NfcDeviceBuilder::use_hid(0x1089, 0x0001)
         .unwrap()
         .finish();
+
+        
+    let cts = CancellationTokenSource::new();
+    cts.cancel_after(std::time::Duration::from_millis(1500));
+
+    device.poll_emv(&cts).unwrap();
 
     //let m = Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap();
 
@@ -33,8 +50,6 @@ fn main() {
 
     //let r = MessageChannel::read(&device, &CancellationTokenSource::new()).unwrap();
 
-    let cts = CancellationTokenSource::new();
-    //cts.cancel_after(std::time::Duration::from_millis(1500));
 
     //let r2 = MessageChannel::read(&device, &cts).unwrap();
     /*

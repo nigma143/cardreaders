@@ -93,12 +93,18 @@ impl MessageChannel for HidDevice {
 
         match opcode {
             0x15 => Ok(ReadMessage::Nack(payload[0])),
-            0x3E => Ok(ReadMessage::Do(payload.to_vec())),
+            0x3E => Ok(match payload {
+                [0x00, 0x00] => ReadMessage::Ask,
+                _ => ReadMessage::Do(payload.to_vec()),
+            }),
             0x3D => Ok(match payload {
                 [0x00, 0x00] => ReadMessage::Ask,
                 _ => ReadMessage::Get(payload.to_vec()),
             }),
-            0x3C => Ok(ReadMessage::Set(payload.to_vec())),
+            0x3C => Ok(match payload {
+                [0x00, 0x00] => ReadMessage::Ask,
+                _ => ReadMessage::Set(payload.to_vec()),
+            }),
             _ => Err(MessageChannelError::Other(format!("inccorect OPCODE"))),
         }
     }
