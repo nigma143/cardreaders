@@ -10,7 +10,7 @@ use error::*;
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
 
 impl MessageChannel for HidDevice {
-    fn write(&self, message: &WriteMessage) -> Result<(), MessageChannelError> {
+    fn write(&self, message: &WriteMessage) -> Result<(), WriteMessageError> {
         let (op_code, payload) = match message {
             WriteMessage::Do(payload) => (0x3E_u8, payload),
             WriteMessage::Get(payload) => (0x3D_u8, payload),
@@ -37,7 +37,7 @@ impl MessageChannel for HidDevice {
 
         Ok(())
     }
-    fn read(&self, ct: &CancellationToken) -> Result<ReadMessage, MessageChannelError> {
+    fn read(&self, ct: &CancellationToken) -> Result<ReadMessage, ReadMessageError> {
         self.set_blocking_mode(false)?;
 
         let mut buf: Vec<u8> = vec![];
@@ -48,7 +48,7 @@ impl MessageChannel for HidDevice {
             let mut read = read_frame_less(self)?;
             if read.len() > 0 {
                 if read[0] != 0x02 {
-                    return Err(MessageChannelError::Other(format!("expected STX")));
+                    return Err(ReadMessageError::Other(format!("expected STX")));
                 }
                 buf.append(&mut read);
                 break;
@@ -64,7 +64,7 @@ impl MessageChannel for HidDevice {
         }
 
         let (m_len, offset) = get_message_length(&buf, 1)
-            .ok_or(MessageChannelError::Other(format!("incorrect field LEN")))?;
+            .ok_or(ReadMessageError::Other(format!("incorrect field LEN")))?;
 
         while buf.len() < m_len as usize {
             let mut read = read_frame_less(self)?;
@@ -80,11 +80,11 @@ impl MessageChannel for HidDevice {
         let ext = buf[lrc_index + 1];
 
         if ext != 0x03 {
-            return Err(MessageChannelError::Other(format!("expected ETX")));
+            return Err(ReadMessageError::Other(format!("expected ETX")));
         }
 
         if lrc != calculate_lrc(&buf[0..lrc_index]) {
-            return Err(MessageChannelError::Other(format!("incorrect LRC")));
+            return Err(ReadMessageError::Other(format!("incorrect LRC")));
         }
 
         let payload = &buf[payload_index..lrc_index];
@@ -105,12 +105,12 @@ impl MessageChannel for HidDevice {
                 [0x00, 0x00] => ReadMessage::Ask,
                 _ => ReadMessage::Set(payload.to_vec()),
             }),
-            _ => Err(MessageChannelError::Other(format!("inccorect OPCODE"))),
+            _ => Err(ReadMessageError::Other(format!("inccorect OPCODE"))),
         }
     }
 }
 
-fn write_frame_less(device: &HidDevice, frame: &[u8]) -> Result<(), MessageChannelError> {
+fn write_frame_less(device: &HidDevice, frame: &[u8]) -> Result<(), WriteMessageError> {
     device.set_blocking_mode(true)?;
 
     let chunks: Vec<&[u8]> = frame.chunks(63).collect();
@@ -134,7 +134,7 @@ fn write_frame_less(device: &HidDevice, frame: &[u8]) -> Result<(), MessageChann
 
         let w_count = device.write(&frame)?;
         if w_count != frame.len() {
-            return Err(MessageChannelError::Other(format!(
+            return Err(WriteMessageError::Other(format!(
                 "incorrect write byte count"
             )));
         }
@@ -144,7 +144,7 @@ fn write_frame_less(device: &HidDevice, frame: &[u8]) -> Result<(), MessageChann
     Ok(())
 }
 
-fn read_frame_less(device: &HidDevice) -> Result<Vec<u8>, MessageChannelError> {
+fn read_frame_less(device: &HidDevice) -> Result<Vec<u8>, ReadMessageError> {
     let mut buf: [u8; 64] = [0; 64];
 
     let count = device.read(&mut buf)?;
@@ -155,7 +155,7 @@ fn read_frame_less(device: &HidDevice) -> Result<Vec<u8>, MessageChannelError> {
     log::info!("read: {:02X?}", buf.to_vec());
 
     if count != buf.len() {
-        return Err(MessageChannelError::Other(format!(
+        return Err(ReadMessageError::Other(format!(
             "head read size is incorrect"
         )));
     }
@@ -200,8 +200,14 @@ fn get_message_length(buf: &[u8], offset: usize) -> Option<(u16, usize)> {
     }
 }
 
-impl From<HidError> for MessageChannelError {
+impl From<HidError> for WriteMessageError {
     fn from(error: HidError) -> Self {
-        MessageChannelError::Other(format!("{}", error))
+        WriteMessageError::Other(format!("{}", error))
+    }
+}
+
+impl From<HidError> for ReadMessageError {
+    fn from(error: HidError) -> Self {
+        ReadMessageError::Other(format!("{}", error))
     }
 }

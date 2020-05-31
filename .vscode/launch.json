@@ -8,7 +8,7 @@
           "type": "lldb",
           "request": "launch",
           "name": "Launch",
-          "args": [],
+          "args": ["RUST_BACKTRACE=full"],
           "program": "${workspaceFolder}/target/debug/test_app",
           "windows": {
               "program": "${workspaceFolder}/target/debug/test_app.exe"
@@ -25,7 +25,8 @@
           "name": "(Windows) Launch",
           "type": "cppvsdbg",
           "request": "launch",
-          "program": "${workspaceFolder}/target/debug/test_app.exe",
+          "program": "${workspaceFolder}/target/debug/test_app.exe", 
+          "args": ["RUST_BACKTRACE=full"],
           "stopAtEntry": false,
           "preLaunchTask": "cargo build",
           "cwd": "${workspaceFolder}",

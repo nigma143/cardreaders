@@ -21,6 +21,6 @@ pub enum ReadMessage {
 }
 
 pub trait MessageChannel {
-    fn write(&self, message: &WriteMessage) -> Result<(), MessageChannelError>;
-    fn read(&self, ct: &CancellationToken) -> Result<ReadMessage, MessageChannelError>;
+    fn write(&self, message: &WriteMessage) -> Result<(), WriteMessageError>;
+    fn read(&self, ct: &CancellationToken) -> Result<ReadMessage, ReadMessageError>;
 }

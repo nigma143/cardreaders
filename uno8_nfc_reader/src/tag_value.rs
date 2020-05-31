@@ -146,3 +146,66 @@ impl Deref for IntTagValue {
         &self.val
     }
 }
+
+pub enum AnnexE {
+    EmvTransactionTerminated = 0x09,
+    CollisionMoreThanOnePICCDetected = 0x06,
+    EmvTransactionTerminatedSeePhone = 0x29,
+    EmvTransactionTerminatedUseContactChannel = 0x2A,
+    EmvTransactionTerminatedTryAgain = 0x2B,
+}
+
+pub struct AnnexETagValue {
+    val: AnnexE,
+}
+
+impl TagValue for AnnexETagValue {
+    type Value = AnnexE;
+
+    fn new(val: Self::Value) -> Self {
+        Self { val }
+    }
+
+    fn from_raw(raw: Vec<u8>) -> Result<Self, TlvError>
+    where
+        Self: Sized,
+    {
+        if raw.len() > 1 {
+            return Err(TlvError::ParseTagValue(format!("expected 1 byte")))
+        }
+
+        Ok(Self {
+            val: match raw.first() {
+                Some(a) => {
+                    match a {
+                        0x09 => AnnexE::EmvTransactionTerminated,
+                        0x06 => AnnexE::CollisionMoreThanOnePICCDetected,
+                        0x29 => AnnexE::EmvTransactionTerminatedSeePhone,
+                        0x2A => AnnexE::EmvTransactionTerminatedUseContactChannel,
+                        0x2B => AnnexE::EmvTransactionTerminatedTryAgain,
+                        _ => return Err(TlvError::ParseTagValue(format!("unknown AnnexE code {:02X}", a)))
+                    }
+                },
+                _ => return Err(TlvError::ParseTagValue(format!("expected 1 byte"))),
+            }
+        })
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        match self.val {
+            AnnexE::EmvTransactionTerminated => [0x09].to_vec(),
+            AnnexE::CollisionMoreThanOnePICCDetected => [0x06].to_vec(),
+            AnnexE::EmvTransactionTerminatedSeePhone => [0x29].to_vec(),
+            AnnexE::EmvTransactionTerminatedUseContactChannel => [0x2A].to_vec(),
+            AnnexE::EmvTransactionTerminatedTryAgain => [0x2B].to_vec(),
+        }
+    }
+}
+
+impl Deref for AnnexETagValue {
+    type Target = AnnexE;
+    fn deref(&self) -> &Self::Target {
+        &self.val
+    }
+}
+

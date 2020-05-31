@@ -9,7 +9,7 @@ use cancellation::{CancellationToken, CancellationTokenSource};
 
 use error::*;
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
-use tag_value::U16BigEndianTagValue;
+use tag_value::{U16BigEndianTagValue, AnnexE, AnnexETagValue};
 use tlv_parser::{TagValue, Tlv, Value};
 
 pub struct Uno8NfcDevice<TMessageChannel>
@@ -17,6 +17,7 @@ where
     TMessageChannel: MessageChannel,
 {
     channel: TMessageChannel,
+    read_timeout: Duration,
     ask_timeout: Duration,
 }
 
@@ -30,8 +31,13 @@ where
     {
         Self {
             channel: channel,
-            ask_timeout: Duration::from_millis(150),
+            read_timeout: Duration::from_millis(15000),
+            ask_timeout: Duration::from_millis(30),
         }
+    }
+
+    pub fn set_read_timeout(&mut self, timeout: Duration) {
+        self.read_timeout = timeout;
     }
 
     pub fn set_ack_timeout(&mut self, timeout: Duration) {
@@ -54,13 +60,23 @@ where
         self.write(&WriteMessage::Set(tlv.to_vec()))
     }
 
-    fn write(&self, message: &WriteMessage) -> Result<(), DeviceError> {
+    fn write(&self, message: &WriteMessage) -> Result<(), DeviceError> {        
         self.channel.write(message)?;
 
         let cts = CancellationTokenSource::new();
         cts.cancel_after(self.ask_timeout);
 
-        match self.channel.read(&cts)? {
+        let read_message = match self.channel.read(&cts) {
+            Ok(m) => m,
+            Err(e) => match e {
+                ReadMessageError::OperationCanceled => {
+                    return Err(DeviceError::Timeout(format!("ack not received")))
+                }
+                ReadMessageError::Other(m) => return Err(DeviceError::MessageChannel(m)),
+            },
+        };
+
+        match read_message {
             ReadMessage::Ask => Ok(()),
             ReadMessage::Nack(code) => Err(DeviceError::Other(format!("returned Nack: {}", code))),
             ReadMessage::Do(_) => Err(DeviceError::Other(format!(
@@ -75,8 +91,25 @@ where
         }
     }
 
+    pub fn read_timeout(&self) -> Result<Tlv, DeviceError> {
+        let cts = CancellationTokenSource::new();
+        cts.cancel_after(self.read_timeout);
+
+        self.read(&cts)
+    }
+
     pub fn read(&self, ct: &CancellationToken) -> Result<Tlv, DeviceError> {
-        match self.channel.read(ct)? {
+        let read_message = match self.channel.read(ct) {
+            Ok(m) => m,
+            Err(e) => match e {
+                ReadMessageError::OperationCanceled => {
+                    return Err(DeviceError::Timeout(format!("response not received")))
+                }
+                ReadMessageError::Other(m) => return Err(DeviceError::MessageChannel(m)),
+            },
+        };
+
+        match read_message {
             ReadMessage::Ask => Err(DeviceError::Other(format!(
                 "returned Ack message not expected"
             ))),
@@ -90,6 +123,13 @@ where
         }
     }
 
+    pub fn read_timeout_success(&self) -> Result<Tlv, DeviceError> {
+        let cts = CancellationTokenSource::new();
+        cts.cancel_after(self.read_timeout);
+
+        self.read_success(&cts)
+    }
+
     pub fn read_success(&self, ct: &CancellationToken) -> Result<Tlv, DeviceError> {
         let tlv = self.read(ct)?;
         match tlv.tag() {
@@ -100,17 +140,72 @@ where
         }
     }
 
+    pub fn stop_macro(&self) -> Result<(), DeviceError> {
+        self.write_do(&Tlv::new(0xDF7D, Value::Nothing)?)?;        
+        self.read_timeout_success()?;
+        Ok(())
+    }
+
     pub fn set_poll_timeout(&self, value: u16, ct: &CancellationToken) -> Result<(), DeviceError> {
         self.write_do(&Tlv::new_spec(0xDF8212, U16BigEndianTagValue::new(value))?)?;
         self.read_success(ct)?;
         Ok(())
     }
 
-    pub fn poll_emv(&self, ct: &CancellationToken)-> Result<(), DeviceError> {
+    pub fn poll_emv(&self, ct: &CancellationToken) -> Result<PollEmvResult, DeviceError> {
         self.set_poll_timeout(0, ct)?;
 
         self.write_do(&Tlv::new(0xFD, Value::Nothing)?)?;
-        self.read_success(ct)?;
-        Ok(())
+
+        let tlv = loop {
+            match self.read_success(ct) {
+                Ok(o) => break o,
+                Err(e) => match e {
+                    DeviceError::Timeout(m) => {
+                        match ct.is_canceled() {
+                            true => self.stop_macro()?,
+                            false => return Err(DeviceError::Timeout(m))
+                        }
+                    },
+                    _ => return Err(e)
+                }
+            }
+        };
+
+        match tlv.find_val("FF01 / F2") {
+            Some(f2) => {
+                match f2 {                    
+                    Value::Val(f2v) => {
+                        match AnnexETagValue::from_raw(f2v.to_owned())? {
+                            AnnexE::EmvTransactionTerminated => return Ok(PollEmvResult::Canceled),
+                            AnnexE::CollisionMoreThanOnePICCDetected |
+                            AnnexE::EmvTransactionTerminatedSeePhone|
+                            AnnexE::EmvTransactionTerminatedUseContactChannel |
+                            AnnexE::EmvTransactionTerminatedTryAgain => return Ok(PollEmvResult::Canceled)
+                        }                        
+                    }
+                    _ => return Err(DeviceError::TlvContent(format!("unexpected F2 tag value"), tlv))
+                }
+            }
+            None => {}
+        }
+
+        match tlv.val() {
+            Value::TlvList(childs) => {
+
+            }
+            Value::Val(_) => {}
+            Value::Nothing => {}
+        }
     }
+}
+
+pub struct PollEmvParameters {
+    //Canceled,
+    
+}
+
+pub enum PollEmvResult {
+    Canceled,
+    Success(Tlv)
 }

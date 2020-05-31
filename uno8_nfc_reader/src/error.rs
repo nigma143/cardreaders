@@ -6,8 +6,8 @@ use tlv_parser::{Tlv, TlvError};
 
 #[derive(Error, Debug)]
 pub enum DeviceError {
-    #[error("operation canceled")]
-    OperationCanceled,
+    #[error("timeout: {0}")]
+    Timeout(String),
     #[error("message channel error: {0}")]
     MessageChannel(String),
     #[error("TLV content error: {0}")]
@@ -17,22 +17,30 @@ pub enum DeviceError {
 }
 
 #[derive(Error, Debug)]
-pub enum MessageChannelError {
+pub enum WriteMessageError {
+    #[error("{0}")]
+    Other(String),
+}
+
+#[derive(Error, Debug)]
+pub enum ReadMessageError {
     #[error("operation canceled")]
     OperationCanceled,
     #[error("{0}")]
     Other(String),
 }
 
-impl From<OperationCanceled> for MessageChannelError {
+impl From<OperationCanceled> for ReadMessageError {
     fn from(_: OperationCanceled) -> Self {
-        MessageChannelError::OperationCanceled
+        ReadMessageError::OperationCanceled
     }
 }
 
-impl From<MessageChannelError> for DeviceError {
-    fn from(error: MessageChannelError) -> Self {
-        DeviceError::MessageChannel(format!("{:?}", error))
+impl From<WriteMessageError> for DeviceError {
+    fn from(error: WriteMessageError) -> Self {
+        match error {
+            WriteMessageError::Other(m) => DeviceError::MessageChannel(m)
+        }
     }
 }
 
