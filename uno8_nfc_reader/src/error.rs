@@ -39,7 +39,7 @@ impl From<OperationCanceled> for ReadMessageError {
 impl From<WriteMessageError> for DeviceError {
     fn from(error: WriteMessageError) -> Self {
         match error {
-            WriteMessageError::Other(m) => DeviceError::MessageChannel(m)
+            WriteMessageError::Other(m) => DeviceError::MessageChannel(m),
         }
     }
 }

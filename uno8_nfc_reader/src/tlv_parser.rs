@@ -436,6 +436,19 @@ impl Tlv {
         Tlv::new(tag, Value::Val(value.bytes()))
     }
 
+    pub fn get_val<T>(&self, path: &str) -> Result<Option<T>, TlvError>
+    where
+        T: TagValue,
+    {
+        match self.find_val(path) {
+            Some(s) => match s {
+                Value::Val(raw) => Ok(Some(T::from_raw(raw.to_owned())?)),
+                _ => Err(TlvError::TagPathError),
+            },
+            None => Ok(None),
+        }
+    }
+
     pub fn child(&self, tag: usize) -> Result<&Self, TlvError> {
         match self.val() {
             Value::TlvList(childs) => match childs.iter().find(|x| x.tag == tag) {

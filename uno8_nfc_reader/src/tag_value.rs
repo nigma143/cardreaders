@@ -171,23 +171,26 @@ impl TagValue for AnnexETagValue {
         Self: Sized,
     {
         if raw.len() > 1 {
-            return Err(TlvError::ParseTagValue(format!("expected 1 byte")))
+            return Err(TlvError::ParseTagValue(format!("expected 1 byte")));
         }
 
         Ok(Self {
             val: match raw.first() {
-                Some(a) => {
-                    match a {
-                        0x09 => AnnexE::EmvTransactionTerminated,
-                        0x06 => AnnexE::CollisionMoreThanOnePICCDetected,
-                        0x29 => AnnexE::EmvTransactionTerminatedSeePhone,
-                        0x2A => AnnexE::EmvTransactionTerminatedUseContactChannel,
-                        0x2B => AnnexE::EmvTransactionTerminatedTryAgain,
-                        _ => return Err(TlvError::ParseTagValue(format!("unknown AnnexE code {:02X}", a)))
+                Some(a) => match a {
+                    0x09 => AnnexE::EmvTransactionTerminated,
+                    0x06 => AnnexE::CollisionMoreThanOnePICCDetected,
+                    0x29 => AnnexE::EmvTransactionTerminatedSeePhone,
+                    0x2A => AnnexE::EmvTransactionTerminatedUseContactChannel,
+                    0x2B => AnnexE::EmvTransactionTerminatedTryAgain,
+                    _ => {
+                        return Err(TlvError::ParseTagValue(format!(
+                            "unknown AnnexE code {:02X}",
+                            a
+                        )))
                     }
                 },
                 _ => return Err(TlvError::ParseTagValue(format!("expected 1 byte"))),
-            }
+            },
         })
     }
 
@@ -208,4 +211,3 @@ impl Deref for AnnexETagValue {
         &self.val
     }
 }
-

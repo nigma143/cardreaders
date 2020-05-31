@@ -41,8 +41,8 @@ fn main() {
     let tt = device.poll_emv(&cts).unwrap();
 
     match tt {
-        Some(tlv) => println!("{}", tlv),
-        None => println!("none"),
+        uno8_nfc_reader::device::PollEmvResult::Canceled => {println!("canceled")}
+        uno8_nfc_reader::device::PollEmvResult::Success(x) => {println!("{}", x)}
     }
     //let m = Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap();
 

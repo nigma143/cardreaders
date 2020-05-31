@@ -9,7 +9,7 @@ use cancellation::{CancellationToken, CancellationTokenSource};
 
 use error::*;
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
-use tag_value::{U16BigEndianTagValue, AnnexE, AnnexETagValue};
+use tag_value::{AnnexE, AnnexETagValue, U16BigEndianTagValue};
 use tlv_parser::{TagValue, Tlv, Value};
 
 pub struct Uno8NfcDevice<TMessageChannel>
@@ -60,7 +60,7 @@ where
         self.write(&WriteMessage::Set(tlv.to_vec()))
     }
 
-    fn write(&self, message: &WriteMessage) -> Result<(), DeviceError> {        
+    fn write(&self, message: &WriteMessage) -> Result<(), DeviceError> {
         self.channel.write(message)?;
 
         let cts = CancellationTokenSource::new();
@@ -141,7 +141,7 @@ where
     }
 
     pub fn stop_macro(&self) -> Result<(), DeviceError> {
-        self.write_do(&Tlv::new(0xDF7D, Value::Nothing)?)?;        
+        self.write_do(&Tlv::new(0xDF7D, Value::Nothing)?)?;
         self.read_timeout_success()?;
         Ok(())
     }
@@ -157,55 +157,47 @@ where
 
         self.write_do(&Tlv::new(0xFD, Value::Nothing)?)?;
 
-        let tlv = loop {
-            match self.read_success(ct) {
-                Ok(o) => break o,
-                Err(e) => match e {
-                    DeviceError::Timeout(m) => {
-                        match ct.is_canceled() {
-                            true => self.stop_macro()?,
-                            false => return Err(DeviceError::Timeout(m))
-                        }
-                    },
-                    _ => return Err(e)
-                }
-            }
-        };
+        let unlim_ct = CancellationTokenSource::new();
 
-        match tlv.find_val("FF01 / F2") {
-            Some(f2) => {
-                match f2 {                    
-                    Value::Val(f2v) => {
-                        match AnnexETagValue::from_raw(f2v.to_owned())? {
+        let mut fact_ct = ct;
+        loop {
+            match self.read(fact_ct) {
+                Ok(tlv) => {
+                    if let Some(tarminate) = tlv.get_val::<AnnexETagValue>("FF03 / F2 / DF68")? {
+                        match *tarminate {
                             AnnexE::EmvTransactionTerminated => return Ok(PollEmvResult::Canceled),
-                            AnnexE::CollisionMoreThanOnePICCDetected |
-                            AnnexE::EmvTransactionTerminatedSeePhone|
-                            AnnexE::EmvTransactionTerminatedUseContactChannel |
-                            AnnexE::EmvTransactionTerminatedTryAgain => return Ok(PollEmvResult::Canceled)
-                        }                        
+                            AnnexE::CollisionMoreThanOnePICCDetected => {}
+                            AnnexE::EmvTransactionTerminatedSeePhone => {}
+                            AnnexE::EmvTransactionTerminatedUseContactChannel => {}
+                            AnnexE::EmvTransactionTerminatedTryAgain => {}
+                        }
                     }
-                    _ => return Err(DeviceError::TlvContent(format!("unexpected F2 tag value"), tlv))
+                    if let Some(_) = tlv.find_val("FF01 / FC") {
+                        return Ok(PollEmvResult::Success(tlv));
+                    }
+
+                    return Err(DeviceError::TlvContent(format!("invalid response TLV"), tlv));
                 }
-            }
-            None => {}
-        }
-
-        match tlv.val() {
-            Value::TlvList(childs) => {
-
-            }
-            Value::Val(_) => {}
-            Value::Nothing => {}
+                Err(e) => match e {
+                    DeviceError::Timeout(m) => match ct.is_canceled() {
+                        true => { 
+                            self.stop_macro()?;
+                            fact_ct = &unlim_ct;
+                        },
+                        false => return Err(DeviceError::Timeout(m)),
+                    },
+                    _ => return Err(e),
+                },
+            };
         }
     }
 }
 
 pub struct PollEmvParameters {
     //Canceled,
-    
 }
 
 pub enum PollEmvResult {
     Canceled,
-    Success(Tlv)
+    Success(Tlv),
 }
