@@ -7,9 +7,11 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+card_less_reader = { path = "../card_less_reader" }
 uno8_nfc_reader = { path = "../uno8_nfc_reader" }
 
 hidapi = ""
 tlv_parser = ""
 simple_logger = ""
 cancellation = ""
+byteorder = ""

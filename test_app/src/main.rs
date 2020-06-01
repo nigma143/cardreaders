@@ -12,99 +12,38 @@ use undefine_nfc_reader::tlv_handler::TlvHandler;*/
 
 use cancellation::{CancellationTokenSource, OperationCanceled};
 
-use uno8_nfc_reader::device::Uno8NfcDevice;
+use card_less_reader::device::*;
+use card_less_reader::tag_value::*;
+use card_less_reader::tlv_parser::*;
+use uno8_nfc_reader::device::{ExternalDisplayMode, Uno8NfcDevice};
 use uno8_nfc_reader::device_builder::Uno8NfcDeviceBuilder;
 use uno8_nfc_reader::message_channel::{MessageChannel, ReadMessage, WriteMessage};
-use uno8_nfc_reader::tag_value::IntTagValue;
-use uno8_nfc_reader::tlv_parser::{TagValue, Tlv, Value};
 
 fn main() {
-    let n = 123456;
-    let sa = IntTagValue::new((n, 10));
-    println!("{:?}", sa.bytes());
-
-    let bs = sa.bytes();
-
-    let dd1 = IntTagValue::from_raw(bs).unwrap();
-
-    println!("{:?}", *dd1);
-
     simple_logger::init().unwrap();
 
     let device = Uno8NfcDeviceBuilder::use_hid(0x1089, 0x0001)
         .unwrap()
+        .set_external_display(Box::new(|x| println!("Display: {}", x)))
+        .set_internal_log(Box::new(|x| println!("Log: {}", x)))
+        .set_card_removal(Box::new(|| println!("Card removal")))
         .finish();
 
+    device
+        .set_external_display_mode(ExternalDisplayMode::SendFilteredPresetMessages)
+        .unwrap();
+
+    poll_emv(&device);
+}
+
+fn poll_emv(device: &impl CardLessDevice) {
     let cts = CancellationTokenSource::new();
-    cts.cancel_after(std::time::Duration::from_millis(1500));
+    //cts.cancel_after(std::time::Duration::from_millis(1500));
 
     let tt = device.poll_emv(&cts).unwrap();
 
     match tt {
-        uno8_nfc_reader::device::PollEmvResult::Canceled => {println!("canceled")}
-        uno8_nfc_reader::device::PollEmvResult::Success(x) => {println!("{}", x)}
+        PollEmvResult::Canceled => println!("canceled"),
+        PollEmvResult::Success(x) => println!("{}", x),
     }
-    //let m = Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap();
-
-    //device.write_get(&m).unwrap();
-    //device.read(&CancellationTokenSource::new()).unwrap();
-
-    //MessageChannel::write(&device, &WriteMessage::Get(m.to_vec()), &CancellationTokenSource::new()).unwrap();
-
-    //let r = MessageChannel::read(&device, &CancellationTokenSource::new()).unwrap();
-
-    //let r2 = MessageChannel::read(&device, &cts).unwrap();
-    /*
-        device.set_blocking_mode(false).unwrap();
-
-        let h = TlvHandler::new_from_frame_channel(HidFrameChannel::new(device));
-        /*
-            let m = Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap();
-
-            h.request_get(m).unwrap();
-
-            let rs = h
-                .response(|x| true, std::time::Duration::from_millis(500))
-                .unwrap();
-        */
-        //let r = undefine_nfc_reader::tlv_handler::get_serial(&h);
-    println!("----------------------------");
-        let h = Arc::new(h);
-
-        for i in 0..2 {
-            let s_h = h.clone();
-            thread::spawn(move || {
-                let m = Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap();
-
-                //s_h.request_get(m).unwrap();
-
-                let rs = s_h
-                    .response(|x| true, std::time::Duration::from_millis(50000))
-                    .unwrap();
-            });
-        }
-
-        //drop(tlv_queue);
-        thread::sleep(std::time::Duration::from_millis(5000));
-        println!("dsfsd");
-
-        /*tlv_channel
-            .write(&WriteTlv::Get(
-                Tlv::new_with_raw_val(0xDF46, vec![0x00, 0x00]).unwrap(),
-            ))
-            .unwrap();
-
-        let rs = tlv_channel.read().unwrap();
-        println!("{}", rs);
-
-        let rs = tlv_channel.read().unwrap();
-        println!("{}", rs);
-
-        let t1 = Tlv::new_with_raw_val(0xDF01, vec![0x00]).unwrap();
-
-        let t2 = Tlv::new_with_childs(0xFF02, vec![t1]).unwrap();
-
-        let t3 = Tlv::new_with_childs(0xFF03, vec![t2]).unwrap();
-
-        println!("{}", TlvDecorator::new(&t3));*/*/
 }

@@ -33,7 +33,9 @@ impl MessageChannel for HidDevice {
         raw_message.push(calculate_lrc(&raw_message));
         raw_message.push(0x03);
 
+        self.set_blocking_mode(true)?;
         write_frame_less(self, &raw_message)?;
+        self.set_blocking_mode(false)?;
 
         Ok(())
     }
@@ -111,8 +113,6 @@ impl MessageChannel for HidDevice {
 }
 
 fn write_frame_less(device: &HidDevice, frame: &[u8]) -> Result<(), WriteMessageError> {
-    device.set_blocking_mode(true)?;
-
     let chunks: Vec<&[u8]> = frame.chunks(63).collect();
     for i in 0..chunks.len() {
         let mut frame = Vec::new();
@@ -140,7 +140,6 @@ fn write_frame_less(device: &HidDevice, frame: &[u8]) -> Result<(), WriteMessage
         }
     }
 
-    device.set_blocking_mode(false)?;
     Ok(())
 }
 

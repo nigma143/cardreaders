@@ -32,6 +32,26 @@ where
         self
     }
 
+    pub fn set_read_timeout(mut self, timeout: Duration) -> Self {
+        self.device.set_read_timeout(timeout);
+        self
+    }
+
+    pub fn set_external_display(mut self, f: Box<dyn Fn(&String)>) -> Self {
+        self.device.set_external_display(f);
+        self
+    }
+
+    pub fn set_internal_log(mut self, f: Box<dyn Fn(&String)>) -> Self {
+        self.device.set_internal_log(f);
+        self
+    }
+
+    pub fn set_card_removal(mut self, f: Box<dyn Fn()>) -> Self {
+        self.device.set_card_removal(f);
+        self
+    }
+
     pub fn finish(self) -> Uno8NfcDevice<TMessageChannel> {
         self.device
     }
