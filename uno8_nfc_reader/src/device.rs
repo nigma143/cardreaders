@@ -8,13 +8,13 @@ use cancellation::{CancellationToken, CancellationTokenSource};
 use card_less_reader::{
     device::*,
     error::*,
-    tag_value::{AnnexE, AnnexETagValue, StringAsciiTagValue, U16BigEndianTagValue},
+    tag_value::{AnnexE, AnnexETagValue, IntTagValue, StringAsciiTagValue, U16BigEndianTagValue},
     tlv_parser::{TagValue, Tlv, Value},
 };
 
 use error::*;
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
-use tag_value::{SerialNumberTagValue};
+use tag_value::SerialNumberTagValue;
 
 pub struct Uno8NfcDevice<TMessageChannel>
 where
@@ -24,9 +24,9 @@ where
     read_timeout: Duration,
     ask_timeout: Duration,
 
-    external_display: Option<Box<dyn Fn(&String)>>,
-    internal_log: Option<Box<dyn Fn(&String)>>,
-    card_removal: Option<Box<dyn Fn()>>,
+    external_display: Option<Box<dyn Fn(&String) + Send>>,
+    internal_log: Option<Box<dyn Fn(&String) + Send>>,
+    card_removal: Option<Box<dyn Fn() + Send>>,
 }
 
 impl<TMessageChannel> Uno8NfcDevice<TMessageChannel>
@@ -59,16 +59,16 @@ where
         self.ask_timeout
     }
 
-    pub fn set_external_display(&mut self, f: Box<dyn Fn(&String)>) {
-        self.external_display = Some(f);
+    pub fn set_external_display(&mut self, f: impl Fn(&String) + Send + 'static) {
+        self.external_display = Some(Box::new(f));
     }
 
-    pub fn set_internal_log(&mut self, f: Box<dyn Fn(&String)>) {
-        self.internal_log = Some(f);
+    pub fn set_internal_log(&mut self, f: impl Fn(&String) + Send + 'static) {
+        self.internal_log = Some(Box::new(f));
     }
 
-    pub fn set_card_removal(&mut self, f: Box<dyn Fn()>) {
-        self.card_removal = Some(f);
+    pub fn set_card_removal(&mut self, f: impl Fn() + Send + 'static) {
+        self.card_removal = Some(Box::new(f));
     }
 
     fn write_do(&self, tlv: &Tlv) -> Result<(), DeviceError> {
@@ -157,7 +157,7 @@ where
                     }
                     continue;
                 }
-                if let Some(internal_log) = tlv.get_val::<StringAsciiTagValue>("FF01 / DF8154")? {
+                /*if let Some(internal_log) = tlv.get_val::<StringAsciiTagValue>("FF01 / DF8154")? {
                     if let Some(handler) = &self.internal_log {
                         handler(&internal_log)
                     }
@@ -168,7 +168,7 @@ where
                         handler()
                     }
                     continue;
-                }
+                }*/
             }
 
             return Ok(tlv);
@@ -232,15 +232,39 @@ where
         self.write_get(&Tlv::new(0xDF4D, Value::Nothing)?)?;
         let tlv = self.read_timeout_success()?;
         match tlv.get_val::<SerialNumberTagValue>("FF01 / DF4D")? {
-            Some(s) => Ok(format!("{}_{}_{}", s.get_bom_version(), s.get_partial_pn(), s.get_unique_id())),
-            None => Err(DeviceError::TlvContent(format!("expected serial number tag"), tlv))
+            Some(s) => Ok(format!(
+                "{}_{}_{}",
+                s.get_bom_version(),
+                s.get_partial_pn(),
+                s.get_unique_id()
+            )),
+            None => Err(DeviceError::TlvContent(
+                format!("expected serial number tag"),
+                tlv,
+            )),
         }
     }
 
-    fn poll_emv(&self, ct: &CancellationToken) -> Result<PollEmvResult, DeviceError> {
+    fn poll_emv(
+        &self,
+        purchase: Option<PollEmvPurchase>,
+        ct: &CancellationToken,
+    ) -> Result<PollEmvResult, DeviceError> {
         self.set_poll_timeout(0)?;
 
-        self.write_do(&Tlv::new(0xFD, Value::Nothing)?)?;
+        let r_tlv = match purchase {
+            Some(s) => Tlv::new(
+                0xFD,
+                Value::TlvList(vec![
+                    Tlv::new(0x9C, Value::Val(vec![s.p_type]))?,
+                    Tlv::new_spec(0x5F2A, IntTagValue::new((s.currency_code as u64, 4)))?,
+                    Tlv::new_spec(0x9F02, IntTagValue::new((s.amount, 12)))?,
+                ]),
+            )?,
+            None => Tlv::new(0xFD, Value::Nothing)?,
+        };
+
+        self.write_do(&r_tlv)?;
 
         let dummy_ct = CancellationTokenSource::new();
 

@@ -8,7 +8,7 @@ use hidapi::{HidDevice, HidError};
 use error::*;
 
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
-use std::{time::Duration, thread};
+use std::{thread, time::Duration};
 
 impl MessageChannel for HidDevice {
     fn write(&self, message: &WriteMessage) -> Result<(), WriteMessageError> {

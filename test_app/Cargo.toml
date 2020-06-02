@@ -15,3 +15,10 @@ tlv_parser = ""
 simple_logger = ""
 cancellation = ""
 byteorder = ""
+
+#cursive = { git = "https://github.com/gyscos/cursive" }
+
+[dependencies.cursive]
+version = "0.15.0"
+default-features = false
+features = ["crossterm-backend"]

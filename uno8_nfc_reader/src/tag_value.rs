@@ -1,10 +1,10 @@
-use card_less_reader::tlv_parser::{TagValue, TlvError};
 use card_less_reader::tag_value::*;
+use card_less_reader::tlv_parser::{TagValue, TlvError};
 
 pub struct SerialNumberTagValue {
     bom_version: U16BigEndianTagValue,
     partial_pn: U16BigEndianTagValue,
-    unique_id: HexTagValue
+    unique_id: HexTagValue,
 }
 
 impl SerialNumberTagValue {
@@ -28,17 +28,18 @@ impl TagValue for SerialNumberTagValue {
         Self {
             bom_version: val.0,
             partial_pn: val.1,
-            unique_id: val.2
+            unique_id: val.2,
         }
     }
 
     fn from_raw(raw: &[u8]) -> Result<Self, TlvError>
     where
-        Self: Sized {
+        Self: Sized,
+    {
         Ok(Self {
             bom_version: U16BigEndianTagValue::from_raw(&raw[0..2])?,
             partial_pn: U16BigEndianTagValue::from_raw(&raw[2..4])?,
-            unique_id: HexTagValue::from_raw(&raw[4..8])?
+            unique_id: HexTagValue::from_raw(&raw[4..8])?,
         })
     }
 

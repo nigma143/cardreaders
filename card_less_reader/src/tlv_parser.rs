@@ -419,10 +419,10 @@ impl Tlv {
         output.push_str(&format!("{}- {:02X}: ", &ident, tlv.tag()));
         match tlv.val() {
             Value::Val(val) => output.push_str(&format!("{:02X?}", val)),
-            Value::TlvList(childs) => {
-                output.push_str("\n");
+            Value::TlvList(childs) => {                
                 ident.push_str("  ");
                 for child in childs {
+                    output.push_str("\n");
                     Self::display_write(&child, ident, output);
                 }
             }

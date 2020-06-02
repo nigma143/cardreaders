@@ -212,18 +212,15 @@ impl Deref for AnnexETagValue {
     }
 }
 
-
 pub struct HexTagValue {
-    val: String
+    val: String,
 }
 
 impl TagValue for HexTagValue {
     type Value = String;
 
     fn new(val: Self::Value) -> Self {
-        Self {
-            val: val
-        }
+        Self { val: val }
     }
 
     fn from_raw(raw: &[u8]) -> Result<Self, TlvError>
@@ -231,12 +228,13 @@ impl TagValue for HexTagValue {
         Self: Sized,
     {
         Ok(Self {
-            val: raw.iter().map(|x| format!("{:X}", x)).collect()
+            val: raw.iter().map(|x| format!("{:X}", x)).collect(),
         })
     }
 
     fn bytes(&self) -> Vec<u8> {
-        self.val.chars()
+        self.val
+            .chars()
             .map(|x| x.to_digit(16).unwrap() as u8)
             .collect::<Vec<u8>>()
             .chunks(2)
