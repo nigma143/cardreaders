@@ -36,12 +36,12 @@ impl TagValue for StringAsciiTagValue {
         Self { val }
     }
 
-    fn from_raw(raw: Vec<u8>) -> Result<Self, TlvError>
+    fn from_raw(raw: &[u8]) -> Result<Self, TlvError>
     where
         Self: Sized,
     {
         Ok(Self {
-            val: String::from_utf8(raw)?,
+            val: String::from_utf8(raw.to_vec())?,
         })
     }
 
@@ -68,7 +68,7 @@ impl TagValue for U16BigEndianTagValue {
         Self { val }
     }
 
-    fn from_raw(raw: Vec<u8>) -> Result<Self, TlvError>
+    fn from_raw(raw: &[u8]) -> Result<Self, TlvError>
     where
         Self: Sized,
     {
@@ -106,13 +106,13 @@ impl TagValue for IntTagValue {
         }
     }
 
-    fn from_raw(raw: Vec<u8>) -> Result<Self, TlvError>
+    fn from_raw(raw: &[u8]) -> Result<Self, TlvError>
     where
         Self: Sized,
     {
         let mut str = String::new();
         for b in raw {
-            str.push_str(&format!("{:x}", b as u8))
+            str.push_str(&format!("{:x}", b.clone() as u8))
         }
 
         Ok(Self {
@@ -166,7 +166,7 @@ impl TagValue for AnnexETagValue {
         Self { val }
     }
 
-    fn from_raw(raw: Vec<u8>) -> Result<Self, TlvError>
+    fn from_raw(raw: &[u8]) -> Result<Self, TlvError>
     where
         Self: Sized,
     {
@@ -207,6 +207,46 @@ impl TagValue for AnnexETagValue {
 
 impl Deref for AnnexETagValue {
     type Target = AnnexE;
+    fn deref(&self) -> &Self::Target {
+        &self.val
+    }
+}
+
+
+pub struct HexTagValue {
+    val: String
+}
+
+impl TagValue for HexTagValue {
+    type Value = String;
+
+    fn new(val: Self::Value) -> Self {
+        Self {
+            val: val
+        }
+    }
+
+    fn from_raw(raw: &[u8]) -> Result<Self, TlvError>
+    where
+        Self: Sized,
+    {
+        Ok(Self {
+            val: raw.iter().map(|x| format!("{:X}", x)).collect()
+        })
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        self.val.chars()
+            .map(|x| x.to_digit(16).unwrap() as u8)
+            .collect::<Vec<u8>>()
+            .chunks(2)
+            .map(|x| (x[0] * 16) + x[1])
+            .collect()
+    }
+}
+
+impl Deref for HexTagValue {
+    type Target = String;
     fn deref(&self) -> &Self::Target {
         &self.val
     }

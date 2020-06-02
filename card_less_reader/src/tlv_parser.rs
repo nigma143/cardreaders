@@ -91,7 +91,7 @@ pub trait TagValue {
 
     fn new(val: Self::Value) -> Self;
 
-    fn from_raw(raw: Vec<u8>) -> Result<Self, TlvError>
+    fn from_raw(raw: &[u8]) -> Result<Self, TlvError>
     where
         Self: Sized;
 
@@ -310,7 +310,7 @@ impl Tlv {
     }
 
     /// Reads out tag number
-    fn read_tag(iter: &mut ExactSizeIterator<Item = &u8>) -> Result<Tag, TlvError> {
+    fn read_tag(iter: &mut dyn ExactSizeIterator<Item = &u8>) -> Result<Tag, TlvError> {
         let mut tag: usize;
 
         let first: u8 = iter.next().cloned().ok_or_else(|| TlvError::TruncatedTlv)?;
@@ -339,7 +339,7 @@ impl Tlv {
     }
 
     /// Reads out TLV value's length
-    fn read_len(iter: &mut ExactSizeIterator<Item = &u8>) -> Result<usize, TlvError> {
+    fn read_len(iter: &mut dyn ExactSizeIterator<Item = &u8>) -> Result<usize, TlvError> {
         let mut len: usize;
         len = *iter.next().ok_or_else(|| TlvError::TruncatedTlv)? as usize;
 
@@ -372,7 +372,7 @@ impl Tlv {
     }
 
     /// Initializes Tlv object iterator of Vec<u8>
-    fn from_iter(iter: &mut ExactSizeIterator<Item = &u8>) -> Result<Tlv, TlvError> {
+    fn from_iter(iter: &mut dyn ExactSizeIterator<Item = &u8>) -> Result<Tlv, TlvError> {
         let tag = Tlv::read_tag(iter)?;
         let len = Tlv::read_len(iter)?;
 
@@ -442,7 +442,7 @@ impl Tlv {
     {
         match self.find_val(path) {
             Some(s) => match s {
-                Value::Val(raw) => Ok(Some(T::from_raw(raw.to_owned())?)),
+                Value::Val(raw) => Ok(Some(T::from_raw(raw)?)),
                 _ => Err(TlvError::TagPathError),
             },
             None => Ok(None),

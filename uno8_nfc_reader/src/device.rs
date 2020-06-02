@@ -1,5 +1,6 @@
 use crate::error;
 use crate::message_channel;
+use crate::tag_value;
 
 use std::time::Duration;
 
@@ -13,6 +14,7 @@ use card_less_reader::{
 
 use error::*;
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
+use tag_value::{SerialNumberTagValue};
 
 pub struct Uno8NfcDevice<TMessageChannel>
 where
@@ -226,6 +228,15 @@ impl<TMessageChannel> CardLessDevice for Uno8NfcDevice<TMessageChannel>
 where
     TMessageChannel: MessageChannel,
 {
+    fn get_serial_number(&self) -> Result<String, DeviceError> {
+        self.write_get(&Tlv::new(0xDF4D, Value::Nothing)?)?;
+        let tlv = self.read_timeout_success()?;
+        match tlv.get_val::<SerialNumberTagValue>("FF01 / DF4D")? {
+            Some(s) => Ok(format!("{}_{}_{}", s.get_bom_version(), s.get_partial_pn(), s.get_unique_id())),
+            None => Err(DeviceError::TlvContent(format!("expected serial number tag"), tlv))
+        }
+    }
+
     fn poll_emv(&self, ct: &CancellationToken) -> Result<PollEmvResult, DeviceError> {
         self.set_poll_timeout(0)?;
 

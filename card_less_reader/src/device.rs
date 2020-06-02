@@ -7,6 +7,8 @@ use error::*;
 use tlv_parser::Tlv;
 
 pub trait CardLessDevice {
+    fn get_serial_number(&self) -> Result<String, DeviceError>;
+
     fn poll_emv(&self, ct: &CancellationToken) -> Result<PollEmvResult, DeviceError>;
 }
 

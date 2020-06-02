@@ -1,23 +1,8 @@
-use std::ops::{Deref, DerefMut};
-use std::sync::{Arc, Mutex};
-use std::thread;
-
-use hidapi::*;
-/*use tlv_parser::tlv::{Tlv, Value};
-use undefine_nfc_reader::frame_channel::HidFrameChannel;
-use undefine_nfc_reader::message_channel::{Message, MessageChannel};
-use undefine_nfc_reader::tlv::{AsciiString, TlvDecorator, TlvExtensions};
-use undefine_nfc_reader::tlv_channel::{ReadTlv, TlvChannel, WriteTlv};
-use undefine_nfc_reader::tlv_handler::TlvHandler;*/
-
-use cancellation::{CancellationTokenSource, OperationCanceled};
+use cancellation::{CancellationTokenSource};
 
 use card_less_reader::device::*;
-use card_less_reader::tag_value::*;
-use card_less_reader::tlv_parser::*;
-use uno8_nfc_reader::device::{ExternalDisplayMode, Uno8NfcDevice};
+use uno8_nfc_reader::device::{ExternalDisplayMode};
 use uno8_nfc_reader::device_builder::Uno8NfcDeviceBuilder;
-use uno8_nfc_reader::message_channel::{MessageChannel, ReadMessage, WriteMessage};
 
 fn main() {
     simple_logger::init().unwrap();
@@ -32,6 +17,8 @@ fn main() {
     device
         .set_external_display_mode(ExternalDisplayMode::SendFilteredPresetMessages)
         .unwrap();
+
+    println!("Serial number: {}", device.get_serial_number().unwrap());
 
     poll_emv(&device);
 }
