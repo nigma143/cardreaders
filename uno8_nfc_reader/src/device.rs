@@ -16,7 +16,7 @@ use card_less_reader::{
 
 use error::*;
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
-use tag_value::SerialNumberTagValue;
+use tag_value::{ExternalDisplayModeTagValue, SerialNumberTagValue};
 
 struct NotifyCallbacks {
     external_display: Option<Box<dyn Fn(&String) + Send>>,
@@ -363,14 +363,23 @@ impl CardLessDevice for Uno8NfcDevice {
         }
     }
 
+    fn get_external_display_mode(&self) -> Result<ExternalDisplayMode, DeviceError> {
+        self.write_get(Tlv::new(0xDF46, Value::Nothing)?)?;
+
+        let tlv = self.read_success()?;
+        match tlv.get_val::<ExternalDisplayModeTagValue>("FF01 / DF46")? {
+            Some(s) => Ok(*s),
+            None => Err(DeviceError::TlvContent(
+                format!("expected serial number tag"),
+                tlv,
+            )),
+        }
+    }
+
     fn set_external_display_mode(&self, value: &ExternalDisplayMode) -> Result<(), DeviceError> {
-        self.write_set(Tlv::new(
+        self.write_set(Tlv::new_spec(
             0xDF46,
-            Value::Val(match value {
-                ExternalDisplayMode::NoExternalDisplay => [0x00].to_vec(),
-                ExternalDisplayMode::SendIndexOfPresetMessage => [0x01].to_vec(),
-                ExternalDisplayMode::SendFilteredPresetMessages => [0x02].to_vec(),
-            }),
+            ExternalDisplayModeTagValue::new(*value),
         )?)?;
         self.read()?;
         Ok(())

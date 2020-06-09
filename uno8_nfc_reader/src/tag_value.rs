@@ -1,5 +1,9 @@
 use card_less_reader::tag_value::*;
-use card_less_reader::tlv_parser::{TagValue, TlvError};
+use card_less_reader::{
+    device::ExternalDisplayMode,
+    tlv_parser::{TagValue, TlvError},
+};
+use std::ops::Deref;
 
 pub struct SerialNumberTagValue {
     bom_version: U16BigEndianTagValue,
@@ -49,5 +53,58 @@ impl TagValue for SerialNumberTagValue {
         vec.append(&mut self.partial_pn.bytes());
         vec.append(&mut self.unique_id.bytes());
         vec
+    }
+}
+
+pub struct ExternalDisplayModeTagValue {
+    val: ExternalDisplayMode,
+}
+
+impl TagValue for ExternalDisplayModeTagValue {
+    type Value = ExternalDisplayMode;
+
+    fn new(val: Self::Value) -> Self {
+        Self { val: val }
+    }
+
+    fn from_raw(raw: &[u8]) -> Result<Self, TlvError>
+    where
+        Self: Sized,
+    {
+        if raw.len() > 1 {
+            return Err(TlvError::ParseTagValue(format!("expected 1 byte")));
+        }
+
+        Ok(Self {
+            val: match raw.first() {
+                Some(a) => match a {
+                    0x00 => ExternalDisplayMode::NoExternalDisplay,
+                    0x01 => ExternalDisplayMode::SendIndexOfPresetMessage,
+                    0x02 => ExternalDisplayMode::SendFilteredPresetMessages,
+                    _ => {
+                        return Err(TlvError::ParseTagValue(format!(
+                            "unknown ExternalDisplayMode code {:02X}",
+                            a
+                        )))
+                    }
+                },
+                _ => return Err(TlvError::ParseTagValue(format!("expected 1 byte"))),
+            },
+        })
+    }
+
+    fn bytes(&self) -> Vec<u8> {
+        match self.val {
+            ExternalDisplayMode::NoExternalDisplay => [0x00].to_vec(),
+            ExternalDisplayMode::SendIndexOfPresetMessage => [0x01].to_vec(),
+            ExternalDisplayMode::SendFilteredPresetMessages => [0x02].to_vec(),
+        }
+    }
+}
+
+impl Deref for ExternalDisplayModeTagValue {
+    type Target = ExternalDisplayMode;
+    fn deref(&self) -> &Self::Target {
+        &self.val
     }
 }

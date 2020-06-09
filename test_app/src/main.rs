@@ -7,15 +7,21 @@ use cursive::event::{Event, Key};
 use cursive::menu::MenuTree;
 use cursive::traits::*;
 use cursive::views::{Button, DummyView, LinearLayout, TextView};
-use cursive::views::{Dialog, EditView, OnEventView, RadioGroup, TextArea};
+use cursive::views::{Dialog, EditView, OnEventView, RadioButton, RadioGroup, TextArea};
 use cursive::Cursive;
 use cursive::{align::HAlign, Printer, Vec2};
 use hidapi::HidApi;
 use std::sync::{Arc, Mutex};
-use std::{collections::VecDeque, sync::mpsc, thread, time::Duration};
+use std::{
+    collections::VecDeque,
+    sync::{mpsc, MutexGuard, PoisonError},
+    thread,
+    time::Duration,
+};
 
 struct Session {
     device: Box<dyn CardLessDevice + Send>,
+    cb_sink: cursive::CbSink,
 }
 
 fn main() {
@@ -24,6 +30,7 @@ fn main() {
 
     // As usual, create the Cursive root
     let mut siv = cursive::default();
+
     siv.add_global_callback('~', cursive::Cursive::toggle_debug_console);
 
     connection(&mut siv);
@@ -81,6 +88,7 @@ fn connection(view: &mut Cursive) {
                                     .set_card_removal(|| log::info!("CardRemoval"))
                                     .finish(),
                             ),
+                            cb_sink: x.cb_sink().clone(),
                         })));
 
                         x.pop_layer();
@@ -113,33 +121,7 @@ fn home(view: &mut Cursive) {
                     external_display_mode(x);
                 })
                 .leaf("Poll emv", |x| {
-                    let session: &Arc<Mutex<Session>> = x.user_data().unwrap();
-
-                    let cts = CancellationTokenSource::new();
-
-                    let ct = cts.token().clone();
-                    let session_ref = Arc::clone(session);
-
-                    thread::spawn(move || {
-                        match session_ref
-                            .lock()
-                            .unwrap()
-                            .device
-                            .poll_emv(Some(PollEmvPurchase::new(1, 643, 1000)), &ct)
-                        {
-                            Ok(o) => match o {
-                                PollEmvResult::Canceled => log::info!("cancel"),
-                                PollEmvResult::Success(tlv) => log::info!("{}", tlv),
-                            },
-                            Err(e) => log::info!("{}", e),
-                        };
-                    });
-
-                    x.add_layer(Dialog::text("wait").button("Cancel", move |y| {
-                        cts.cancel();
-
-                        y.pop_layer();
-                    }));
+                    poll_emv(x);
                 }),
         )
         .add_delimiter()
@@ -157,25 +139,53 @@ fn home(view: &mut Cursive) {
 
 fn external_display_mode(view: &mut Cursive) {
     let mut mode: RadioGroup<ExternalDisplayMode> = RadioGroup::new();
-    
+
+    let mut mode_list = LinearLayout::vertical()
+        .child(
+            mode.button(ExternalDisplayMode::NoExternalDisplay, "NoExternalDisplay")
+                .with_name("1"),
+        )
+        .child(
+            mode.button(
+                ExternalDisplayMode::SendIndexOfPresetMessage,
+                "SendIndexOfPresetMessage",
+            )
+            .with_name("2"),
+        )
+        .child(
+            mode.button(
+                ExternalDisplayMode::SendFilteredPresetMessages,
+                "SendFilteredPresetMessages",
+            )
+            .with_name("3"),
+        );
+
+    let session: &mut Arc<Mutex<Session>> = view.user_data().unwrap();
+    match Arc::clone(session)
+        .lock()
+        .unwrap()
+        .device
+        .get_external_display_mode()
+    {
+        Ok(o) => {
+            let index = match o {
+                ExternalDisplayMode::NoExternalDisplay => "1",
+                ExternalDisplayMode::SendIndexOfPresetMessage => "2",
+                ExternalDisplayMode::SendFilteredPresetMessages => "3",
+            };
+
+            mode_list.call_on_name(index, |y: &mut RadioButton<ExternalDisplayMode>| y.select());
+        }
+        Err(e) => {
+            view.add_layer(Dialog::info(format!("{}", e)));
+            return;
+        }
+    }
+
     view.add_layer(
         Dialog::new()
             .title("External display mode")
-            .content(
-                LinearLayout::vertical()
-                    .child(LinearLayout::vertical().child(mode.button(
-                        ExternalDisplayMode::NoExternalDisplay,
-                        "NoExternalDisplay",
-                    )))
-                    .child(mode.button(
-                        ExternalDisplayMode::SendIndexOfPresetMessage,
-                        "SendIndexOfPresetMessage",
-                    ))
-                    .child(mode.button(
-                        ExternalDisplayMode::SendFilteredPresetMessages,
-                        "SendFilteredPresetMessages",
-                    )),
-            )
+            .content(LinearLayout::vertical().child(mode_list))
             .button("Ok", move |s| {
                 let mode = mode.selection();
 
@@ -186,23 +196,44 @@ fn external_display_mode(view: &mut Cursive) {
                     .device
                     .set_external_display_mode(&mode)
                 {
-                    Ok(o) => {s.pop_layer();},
+                    Ok(o) => {
+                        s.pop_layer();
+                    }
                     Err(e) => s.add_layer(Dialog::info(format!("{}", e))),
                 }
             })
-            .button("Cancel", move |s| {s.pop_layer();}),
+            .button("Cancel", move |s| {
+                s.pop_layer();
+            }),
     );
 }
 
-fn poll_emv(device: &impl CardLessDevice, ct: &CancellationToken) {
-    let tt = device
-        .poll_emv(Some(PollEmvPurchase::new(1, 643, 1000)), &ct)
-        .unwrap();
+fn poll_emv(view: &mut Cursive) {
+    let session: &mut Arc<Mutex<Session>> = view.user_data().unwrap();
 
-    match tt {
-        PollEmvResult::Canceled => println!("canceled"),
-        PollEmvResult::Success(x) => println!("{}", x),
-    }
+    let cts = CancellationTokenSource::new();
+    let ct = cts.token().clone();
+
+    let session_ref = Arc::clone(session);
+    thread::spawn(move || {
+        match session_ref
+            .lock()
+            .unwrap()
+            .device
+            .poll_emv(Some(PollEmvPurchase::new(1, 643, 1000)), &ct)
+        {
+            Ok(o) => match o {
+                PollEmvResult::Canceled => log::info!("cancel"),
+                PollEmvResult::Success(tlv) => log::info!("{}", tlv),
+            },
+            Err(e) => log::info!("{}", e),
+        };
+    });
+
+    view.add_layer(Dialog::text("wait").button("Cancel", move |y| {
+        cts.cancel();
+        y.pop_layer();
+    }));
 }
 
 fn generate_logs(tx: &mpsc::Sender<String>, cb_sink: cursive::CbSink) {
