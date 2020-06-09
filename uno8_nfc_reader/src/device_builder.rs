@@ -36,7 +36,7 @@ where
         self.device.set_read_timeout(timeout);
         self
     }
-        
+
     pub fn set_external_display(mut self, f: impl Fn(&String) + Send + 'static) -> Self {
         self.device.set_external_display(f);
         self

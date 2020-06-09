@@ -72,15 +72,15 @@ where
     }
 
     fn write_do(&self, tlv: &Tlv) -> Result<(), DeviceError> {
-        self.write(&WriteMessage::Do(tlv.to_vec()))
+        self.write(&WriteMessage::Do(tlv))
     }
 
     fn write_get(&self, tlv: &Tlv) -> Result<(), DeviceError> {
-        self.write(&WriteMessage::Get(tlv.to_vec()))
+        self.write(&WriteMessage::Get(tlv))
     }
 
     fn write_set(&self, tlv: &Tlv) -> Result<(), DeviceError> {
-        self.write(&WriteMessage::Set(tlv.to_vec()))
+        self.write(&WriteMessage::Set(tlv))
     }
 
     fn write(&self, message: &WriteMessage) -> Result<(), DeviceError> {
@@ -133,7 +133,7 @@ where
                 },
             };
 
-            let tlv = match &read_message {
+            let tlv = match read_message {
                 ReadMessage::Ask => {
                     return Err(DeviceError::Other(format!(
                         "returned Ack message not expected"
@@ -145,31 +145,35 @@ where
                         code
                     )))
                 }
-                ReadMessage::Do(tlv_raw) => Tlv::from_vec(tlv_raw)?,
-                ReadMessage::Get(tlv_raw) => Tlv::from_vec(tlv_raw)?,
-                ReadMessage::Set(tlv_raw) => Tlv::from_vec(tlv_raw)?,
-            };
+                ReadMessage::Do(tlv) => {
+                    if let Some(display_message) =
+                        tlv.get_val::<StringAsciiTagValue>("FF01 / DF46")?
+                    {
+                        if let Some(handler) = &self.external_display {
+                            handler(&display_message)
+                        }
+                        continue;
+                    }
+                    if let Some(internal_log) =
+                        tlv.get_val::<StringAsciiTagValue>("FF01 / DF8154")?
+                    {
+                        if let Some(handler) = &self.internal_log {
+                            handler(&internal_log)
+                        }
+                        continue;
+                    }
+                    if let Some(_) = tlv.find_val("FF01 / DF08") {
+                        if let Some(handler) = &self.card_removal {
+                            handler()
+                        }
+                        continue;
+                    }
 
-            if let ReadMessage::Do(_) = &read_message {
-                if let Some(display_message) = tlv.get_val::<StringAsciiTagValue>("FF01 / DF46")? {
-                    if let Some(handler) = &self.external_display {
-                        handler(&display_message)
-                    }
-                    continue;
+                    tlv
                 }
-                /*if let Some(internal_log) = tlv.get_val::<StringAsciiTagValue>("FF01 / DF8154")? {
-                    if let Some(handler) = &self.internal_log {
-                        handler(&internal_log)
-                    }
-                    continue;
-                }
-                if let Some(_) = tlv.find_val("FF01 / DF08") {
-                    if let Some(handler) = &self.card_removal {
-                        handler()
-                    }
-                    continue;
-                }*/
-            }
+                ReadMessage::Get(tlv) => tlv,
+                ReadMessage::Set(tlv) => tlv,
+            };
 
             return Ok(tlv);
         }

@@ -15,7 +15,7 @@ tlv_parser = ""
 simple_logger = ""
 cancellation = ""
 byteorder = ""
-
+log = ""
 #cursive = { git = "https://github.com/gyscos/cursive" }
 
 [dependencies.cursive]

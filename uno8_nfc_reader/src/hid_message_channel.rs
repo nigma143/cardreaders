@@ -7,15 +7,16 @@ use hidapi::{HidDevice, HidError};
 
 use error::*;
 
+use card_less_reader::tlv_parser::{Tlv, TlvError};
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
 use std::{thread, time::Duration};
 
 impl MessageChannel for HidDevice {
     fn write(&self, message: &WriteMessage) -> Result<(), WriteMessageError> {
         let (op_code, payload) = match message {
-            WriteMessage::Do(payload) => (0x3E_u8, payload),
-            WriteMessage::Get(payload) => (0x3D_u8, payload),
-            WriteMessage::Set(payload) => (0x3C_u8, payload),
+            WriteMessage::Do(tlv) => (0x3E_u8, tlv.to_vec()),
+            WriteMessage::Get(tlv) => (0x3D_u8, tlv.to_vec()),
+            WriteMessage::Set(tlv) => (0x3C_u8, tlv.to_vec()),
         };
         let raw_message_size = 1 + //STX
         1 + //Unit
@@ -100,15 +101,15 @@ impl MessageChannel for HidDevice {
             0x15 => Ok(ReadMessage::Nack(payload[0])),
             0x3E => Ok(match payload {
                 [0x00, 0x00] => ReadMessage::Ask,
-                _ => ReadMessage::Do(payload.to_vec()),
+                _ => ReadMessage::Do(Tlv::from_vec(payload)?),
             }),
             0x3D => Ok(match payload {
                 [0x00, 0x00] => ReadMessage::Ask,
-                _ => ReadMessage::Get(payload.to_vec()),
+                _ => ReadMessage::Get(Tlv::from_vec(payload)?),
             }),
             0x3C => Ok(match payload {
                 [0x00, 0x00] => ReadMessage::Ask,
-                _ => ReadMessage::Set(payload.to_vec()),
+                _ => ReadMessage::Set(Tlv::from_vec(payload)?),
             }),
             _ => Err(ReadMessageError::Other(format!("inccorect OPCODE"))),
         }
@@ -210,6 +211,12 @@ impl From<HidError> for WriteMessageError {
 
 impl From<HidError> for ReadMessageError {
     fn from(error: HidError) -> Self {
+        ReadMessageError::Other(format!("{}", error))
+    }
+}
+
+impl From<TlvError> for ReadMessageError {
+    fn from(error: TlvError) -> Self {
         ReadMessageError::Other(format!("{}", error))
     }
 }
