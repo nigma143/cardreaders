@@ -1,16 +1,16 @@
 use cancellation::{CancellationToken, CancellationTokenSource};
 
 use card_less_reader::device::*;
-use uno8_nfc_reader::device::ExternalDisplayMode;
 use uno8_nfc_reader::device_builder::Uno8NfcDeviceBuilder;
 
 use cursive::event::{Event, Key};
 use cursive::menu::MenuTree;
 use cursive::traits::*;
 use cursive::views::{Button, DummyView, LinearLayout, TextView};
-use cursive::views::{Dialog, EditView, OnEventView, TextArea};
+use cursive::views::{Dialog, EditView, OnEventView, RadioGroup, TextArea};
 use cursive::Cursive;
 use cursive::{align::HAlign, Printer, Vec2};
+use hidapi::HidApi;
 use std::sync::{Arc, Mutex};
 use std::{collections::VecDeque, sync::mpsc, thread, time::Duration};
 
@@ -24,44 +24,11 @@ fn main() {
 
     // As usual, create the Cursive root
     let mut siv = cursive::default();
-
-    let cb_sink = siv.cb_sink().clone();
-
-    siv.add_global_callback('a', cursive::Cursive::toggle_debug_console);
+    siv.add_global_callback('~', cursive::Cursive::toggle_debug_console);
 
     connection(&mut siv);
 
     siv.run();
-
-    //std::thread::sleep(std::time::Duration::from_millis(5000));
-    /*
-    simple_logger::init().unwrap();
-
-    let device = Uno8NfcDeviceBuilder::use_hid(0x1089, 0x0001)
-        .unwrap()
-        .set_external_display(|x| println!("Display: {}", x))
-        .set_internal_log(|x| println!("Log: {}", x))
-        .set_card_removal(|| println!("Card removal"))
-        .finish();
-
-    device
-        .set_external_display_mode(ExternalDisplayMode::SendFilteredPresetMessages)
-        .unwrap();
-
-    println!("Serial number: {}", device.get_serial_number().unwrap());
-
-    let cts = CancellationTokenSource::new();
-    let ct = cts.token().clone();
-
-    let hander = std::thread::spawn(move || {
-        poll_emv(&device, &ct);
-    });
-
-    let mut buf = "".to_owned();
-    std::io::stdin().read_line(&mut buf).unwrap();
-
-    cts.cancel();
-    hander.join().unwrap();*/
 }
 
 fn connection(view: &mut Cursive) {
@@ -109,7 +76,10 @@ fn connection(view: &mut Cursive) {
                     Ok(o) => {
                         x.set_user_data(Arc::new(Mutex::new(Session {
                             device: Box::new(
-                                o.set_external_display(|x| log::info!("{}", x)).finish(),
+                                o.set_external_display(|x| log::info!("Display: {}", x))
+                                    .set_internal_log(|x| log::info!("InternalLog: {}", x))
+                                    .set_card_removal(|| log::info!("CardRemoval"))
+                                    .finish(),
                             ),
                         })));
 
@@ -139,23 +109,25 @@ fn home(view: &mut Cursive) {
                         Err(e) => x.add_layer(Dialog::info(format!("{}", e))),
                     }
                 })
+                .leaf("External display mode", |x| {
+                    external_display_mode(x);
+                })
                 .leaf("Poll emv", |x| {
                     let session: &Arc<Mutex<Session>> = x.user_data().unwrap();
 
                     let cts = CancellationTokenSource::new();
-                    let ct = cts.token().clone();
 
+                    let ct = cts.token().clone();
                     let session_ref = Arc::clone(session);
 
-                    let hander = std::thread::spawn(move || {
-                        log::info!("get");
+                    thread::spawn(move || {
                         match session_ref
                             .lock()
                             .unwrap()
                             .device
                             .poll_emv(Some(PollEmvPurchase::new(1, 643, 1000)), &ct)
                         {
-                            Ok(r) => match r {
+                            Ok(o) => match o {
                                 PollEmvResult::Canceled => log::info!("cancel"),
                                 PollEmvResult::Success(tlv) => log::info!("{}", tlv),
                             },
@@ -181,6 +153,45 @@ fn home(view: &mut Cursive) {
             .child(TextView::new(device.get_serial_number().unwrap()))
             .full_screen(),
     );*/
+}
+
+fn external_display_mode(view: &mut Cursive) {
+    let mut mode: RadioGroup<ExternalDisplayMode> = RadioGroup::new();
+    
+    view.add_layer(
+        Dialog::new()
+            .title("External display mode")
+            .content(
+                LinearLayout::vertical()
+                    .child(LinearLayout::vertical().child(mode.button(
+                        ExternalDisplayMode::NoExternalDisplay,
+                        "NoExternalDisplay",
+                    )))
+                    .child(mode.button(
+                        ExternalDisplayMode::SendIndexOfPresetMessage,
+                        "SendIndexOfPresetMessage",
+                    ))
+                    .child(mode.button(
+                        ExternalDisplayMode::SendFilteredPresetMessages,
+                        "SendFilteredPresetMessages",
+                    )),
+            )
+            .button("Ok", move |s| {
+                let mode = mode.selection();
+
+                let session: &mut Arc<Mutex<Session>> = s.user_data().unwrap();
+                match Arc::clone(session)
+                    .lock()
+                    .unwrap()
+                    .device
+                    .set_external_display_mode(&mode)
+                {
+                    Ok(o) => {s.pop_layer();},
+                    Err(e) => s.add_layer(Dialog::info(format!("{}", e))),
+                }
+            })
+            .button("Cancel", move |s| {s.pop_layer();}),
+    );
 }
 
 fn poll_emv(device: &impl CardLessDevice, ct: &CancellationToken) {

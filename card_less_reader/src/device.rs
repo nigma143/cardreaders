@@ -9,6 +9,8 @@ use tlv_parser::Tlv;
 pub trait CardLessDevice {
     fn get_serial_number(&self) -> Result<String, DeviceError>;
 
+    fn set_external_display_mode(&self, value: &ExternalDisplayMode) -> Result<(), DeviceError>;
+
     fn poll_emv(
         &self,
         purchase: Option<PollEmvPurchase>,
@@ -36,4 +38,10 @@ impl PollEmvPurchase {
 pub enum PollEmvResult {
     Canceled,
     Success(Tlv),
+}
+
+pub enum ExternalDisplayMode {
+    NoExternalDisplay,
+    SendIndexOfPresetMessage,
+    SendFilteredPresetMessages,
 }

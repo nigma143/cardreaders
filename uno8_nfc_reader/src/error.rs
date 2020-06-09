@@ -10,22 +10,30 @@ pub enum WriteMessageError {
 
 #[derive(Error, Debug)]
 pub enum ReadMessageError {
-    #[error("operation canceled")]
-    OperationCanceled,
     #[error("{0}")]
     Other(String),
 }
 
-impl From<OperationCanceled> for ReadMessageError {
-    fn from(_: OperationCanceled) -> Self {
-        ReadMessageError::OperationCanceled
-    }
+#[derive(Error, Debug)]
+pub enum TryReadMessageError {
+    #[error("empty")]
+    Empty,
+    #[error("{0}")]
+    Other(String),
 }
 
 impl From<WriteMessageError> for DeviceError {
     fn from(error: WriteMessageError) -> Self {
         match error {
             WriteMessageError::Other(m) => DeviceError::MessageChannel(m),
+        }
+    }
+}
+
+impl From<ReadMessageError> for DeviceError {
+    fn from(error: ReadMessageError) -> Self {
+        match error {
+            ReadMessageError::Other(m) => DeviceError::MessageChannel(m),
         }
     }
 }

@@ -41,25 +41,22 @@ impl MessageChannel for HidDevice {
 
         Ok(())
     }
-    fn read(&self, ct: &CancellationToken) -> Result<ReadMessage, ReadMessageError> {
+
+    fn try_read(&self) -> Result<ReadMessage, TryReadMessageError> {
         self.set_blocking_mode(false)?;
 
         let mut buf: Vec<u8> = vec![];
 
-        loop {
-            ct.result()?;
+        let mut read = read_frame_less(self)?;
 
-            let mut read = read_frame_less(self)?;
-            if read.len() > 0 {
-                if read[0] != 0x02 {
-                    return Err(ReadMessageError::Other(format!("expected STX")));
-                }
-                buf.append(&mut read);
-                break;
-            }
-
-            thread::sleep(Duration::from_millis(10));
+        if read.len() == 0 {
+            return Err(TryReadMessageError::Empty);
         }
+
+        if read[0] != 0x02 {
+            return Err(TryReadMessageError::Other(format!("expected STX")));
+        }
+        buf.append(&mut read);
 
         while buf.len() < 5 {
             //UNIT + OPCODE + LEN(1-3)
@@ -86,11 +83,11 @@ impl MessageChannel for HidDevice {
         let ext = buf[lrc_index + 1];
 
         if ext != 0x03 {
-            return Err(ReadMessageError::Other(format!("expected ETX")));
+            return Err(TryReadMessageError::Other(format!("expected ETX")));
         }
 
         if lrc != calculate_lrc(&buf[0..lrc_index]) {
-            return Err(ReadMessageError::Other(format!("incorrect LRC")));
+            return Err(TryReadMessageError::Other(format!("incorrect LRC")));
         }
 
         let payload = &buf[payload_index..lrc_index];
@@ -111,7 +108,7 @@ impl MessageChannel for HidDevice {
                 [0x00, 0x00] => ReadMessage::Ask,
                 _ => ReadMessage::Set(Tlv::from_vec(payload)?),
             }),
-            _ => Err(ReadMessageError::Other(format!("inccorect OPCODE"))),
+            _ => Err(TryReadMessageError::Other(format!("inccorect OPCODE"))),
         }
     }
 }
@@ -218,5 +215,23 @@ impl From<HidError> for ReadMessageError {
 impl From<TlvError> for ReadMessageError {
     fn from(error: TlvError) -> Self {
         ReadMessageError::Other(format!("{}", error))
+    }
+}
+
+impl From<ReadMessageError> for TryReadMessageError {
+    fn from(error: ReadMessageError) -> Self {
+        TryReadMessageError::Other(format!("{}", error))
+    }
+}
+
+impl From<HidError> for TryReadMessageError {
+    fn from(error: HidError) -> Self {
+        TryReadMessageError::Other(format!("{}", error))
+    }
+}
+
+impl From<TlvError> for TryReadMessageError {
+    fn from(error: TlvError) -> Self {
+        TryReadMessageError::Other(format!("{}", error))
     }
 }

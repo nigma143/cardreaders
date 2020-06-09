@@ -2,7 +2,9 @@ use crate::error;
 use crate::message_channel;
 use crate::tag_value;
 
-use std::time::Duration;
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
+use std::sync::{Arc, Mutex};
+use std::{thread, time::Duration};
 
 use cancellation::{CancellationToken, CancellationTokenSource};
 use card_less_reader::{
@@ -16,35 +18,156 @@ use error::*;
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
 use tag_value::SerialNumberTagValue;
 
-pub struct Uno8NfcDevice<TMessageChannel>
-where
-    TMessageChannel: MessageChannel,
-{
-    channel: TMessageChannel,
-    read_timeout: Duration,
-    ask_timeout: Duration,
-
+struct NotifyCallbacks {
     external_display: Option<Box<dyn Fn(&String) + Send>>,
     internal_log: Option<Box<dyn Fn(&String) + Send>>,
     card_removal: Option<Box<dyn Fn() + Send>>,
 }
 
-impl<TMessageChannel> Uno8NfcDevice<TMessageChannel>
-where
-    TMessageChannel: MessageChannel,
-{
-    pub fn new(channel: TMessageChannel) -> Self
-    where
-        TMessageChannel: MessageChannel,
-    {
-        Self {
-            channel: channel,
-            read_timeout: Duration::from_millis(1500),
-            ask_timeout: Duration::from_millis(30),
+pub struct Uno8NfcDevice {
+    write_in: Sender<WriteMessage>,
+    write_out: Receiver<Result<(), WriteMessageError>>,
+    read_out: Receiver<Result<ReadMessage, ReadMessageError>>,
+
+    //channel: TMessageChannel,
+    write_timeout: Duration,
+    read_timeout: Duration,
+    ask_timeout: Duration,
+
+    notify_callbacks: Arc<Mutex<NotifyCallbacks>>,
+}
+
+impl Uno8NfcDevice {
+    pub fn new(channel: impl MessageChannel + Send + 'static) -> Self {
+        let (write_in_tx, write_in_rx) = mpsc::channel();
+        let (write_out_tx, write_out_rx) = mpsc::channel();
+        let (read_out_tx, read_out_rx) = mpsc::channel();
+
+        let notify_callbacks = Arc::new(Mutex::new(NotifyCallbacks {
             external_display: None,
             internal_log: None,
             card_removal: None,
+        }));
+
+        let notify_callbacks_ref = notify_callbacks.clone();
+
+        thread::spawn(move || {
+            Self::channel_loop(
+                channel,
+                notify_callbacks_ref,
+                write_in_rx,
+                write_out_tx,
+                read_out_tx,
+            )
+        });
+
+        Self {
+            write_in: write_in_tx,
+            write_out: write_out_rx,
+            read_out: read_out_rx,
+
+            write_timeout: Duration::from_millis(30),
+            read_timeout: Duration::from_millis(1500),
+            ask_timeout: Duration::from_millis(30),
+
+            notify_callbacks: notify_callbacks,
         }
+    }
+
+    fn channel_loop(
+        channel: impl MessageChannel,
+        notify_callbacks: Arc<Mutex<NotifyCallbacks>>,
+        write_in: Receiver<WriteMessage>,
+        write_out: Sender<Result<(), WriteMessageError>>,
+        read_out: Sender<Result<ReadMessage, ReadMessageError>>,
+    ) {
+        loop {
+            match write_in.try_recv() {
+                Ok(o) => match write_out.send(channel.write(&o)) {
+                    Ok(_) => {}
+                    Err(e) => {
+                        log::debug!("write_in sender is disconnected");
+                        break;
+                    }
+                },
+                Err(e) => match e {
+                    TryRecvError::Empty => match channel.try_read() {
+                        Ok(o) => {
+                            match &o {
+                                ReadMessage::Do(tlv) => {
+                                    if let Some(display_message) =
+                                        tlv.get_val::<StringAsciiTagValue>("FF01 / DF46").unwrap()
+                                    {
+                                        if let Some(handler) =
+                                            &notify_callbacks.lock().unwrap().external_display
+                                        {
+                                            handler(&display_message)
+                                        }
+                                        continue;
+                                    }
+                                    if let Some(internal_log) =
+                                        tlv.get_val::<StringAsciiTagValue>("FF01 / DF8154").unwrap()
+                                    {
+                                        if let Some(handler) =
+                                            &notify_callbacks.lock().unwrap().internal_log
+                                        {
+                                            handler(&internal_log)
+                                        }
+                                        continue;
+                                    }
+                                    if let Some(_) = tlv.find_val("FF01 / DF08") {
+                                        if let Some(handler) =
+                                            &notify_callbacks.lock().unwrap().card_removal
+                                        {
+                                            handler()
+                                        }
+                                        continue;
+                                    }
+                                }
+                                _ => {}
+                            }
+
+                            match read_out.send(Ok(o)) {
+                                Ok(_) => {}
+                                Err(e) => {
+                                    log::debug!("read_out receiver is disconnected");
+                                    break;
+                                }
+                            }
+                        }
+                        Err(e) => match e {
+                            TryReadMessageError::Empty => {}
+                            TryReadMessageError::Other(m) => {
+                                match read_out.send(Err(ReadMessageError::Other(m))) {
+                                    Ok(_) => {}
+                                    Err(e) => {
+                                        log::debug!("read_out receiver is disconnected");
+                                        break;
+                                    }
+                                }
+                            }
+                        },
+                    },
+                    TryRecvError::Disconnected => panic!("Disconnected"),
+                },
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+impl Uno8NfcDevice {
+    pub fn get_write_timeout(&self) -> Duration {
+        self.write_timeout
+    }
+
+    pub fn set_write_timeout(&mut self, timeout: Duration) {
+        self.write_timeout = timeout;
+    }
+
+    pub fn get_read_timeout(&self) -> Duration {
+        self.read_timeout
     }
 
     pub fn set_read_timeout(&mut self, timeout: Duration) {
@@ -60,46 +183,61 @@ where
     }
 
     pub fn set_external_display(&mut self, f: impl Fn(&String) + Send + 'static) {
-        self.external_display = Some(Box::new(f));
+        self.notify_callbacks.lock().unwrap().external_display = Some(Box::new(f));
     }
 
     pub fn set_internal_log(&mut self, f: impl Fn(&String) + Send + 'static) {
-        self.internal_log = Some(Box::new(f));
+        self.notify_callbacks.lock().unwrap().internal_log = Some(Box::new(f));
     }
 
     pub fn set_card_removal(&mut self, f: impl Fn() + Send + 'static) {
-        self.card_removal = Some(Box::new(f));
+        self.notify_callbacks.lock().unwrap().card_removal = Some(Box::new(f));
+    }
+}
+
+impl Uno8NfcDevice {
+    fn write_do(&self, tlv: Tlv) -> Result<(), DeviceError> {
+        self.write(WriteMessage::Do(tlv))
     }
 
-    fn write_do(&self, tlv: &Tlv) -> Result<(), DeviceError> {
-        self.write(&WriteMessage::Do(tlv))
+    fn write_get(&self, tlv: Tlv) -> Result<(), DeviceError> {
+        self.write(WriteMessage::Get(tlv))
     }
 
-    fn write_get(&self, tlv: &Tlv) -> Result<(), DeviceError> {
-        self.write(&WriteMessage::Get(tlv))
+    fn write_set(&self, tlv: Tlv) -> Result<(), DeviceError> {
+        self.write(WriteMessage::Set(tlv))
     }
 
-    fn write_set(&self, tlv: &Tlv) -> Result<(), DeviceError> {
-        self.write(&WriteMessage::Set(tlv))
-    }
+    fn write(&self, message: WriteMessage) -> Result<(), DeviceError> {
+        self.write_in
+            .send(message)
+            .map_err(|x| DeviceError::MessageChannel(format!("send write message fail")))?;
 
-    fn write(&self, message: &WriteMessage) -> Result<(), DeviceError> {
-        self.channel.write(message)?;
-
-        let cts = CancellationTokenSource::new();
-        cts.cancel_after(self.ask_timeout);
-
-        let read_message = match self.channel.read(&cts) {
-            Ok(m) => m,
+        match self.write_out.recv_timeout(self.write_timeout) {
+            Ok(o) => o?,
             Err(e) => match e {
-                ReadMessageError::OperationCanceled => {
-                    return Err(DeviceError::Timeout(format!("ack not received")))
+                mpsc::RecvTimeoutError::Timeout => {
+                    Err(DeviceError::Timeout(format!("recieved write result")))?
                 }
-                ReadMessageError::Other(m) => return Err(DeviceError::MessageChannel(m)),
+                mpsc::RecvTimeoutError::Disconnected => Err(DeviceError::MessageChannel(format!(
+                    "channel is disconnected"
+                )))?,
             },
-        };
+        }
 
-        match read_message {
+        let message = (match self.read_out.recv_timeout(self.ask_timeout) {
+            Ok(o) => o,
+            Err(e) => match e {
+                mpsc::RecvTimeoutError::Timeout => {
+                    Err(DeviceError::Timeout(format!("recieved read ACK")))?
+                }
+                mpsc::RecvTimeoutError::Disconnected => Err(DeviceError::MessageChannel(format!(
+                    "channel is disconnected"
+                )))?,
+            },
+        })?;
+
+        match message {
             ReadMessage::Ask => Ok(()),
             ReadMessage::Nack(code) => Err(DeviceError::Other(format!("returned Nack: {}", code))),
             ReadMessage::Do(_) => Err(DeviceError::Other(format!(
@@ -114,26 +252,64 @@ where
         }
     }
 
-    fn read_timeout(&self) -> Result<Tlv, DeviceError> {
-        let cts = CancellationTokenSource::new();
-        cts.cancel_after(self.read_timeout);
-
-        self.read(&cts)
+    fn read_success(&self) -> Result<Tlv, DeviceError> {
+        let tlv = self.read()?;
+        match tlv.tag() {
+            0xFF01 => Ok(tlv),
+            0xFF02 => Err(DeviceError::TlvContent(format!("Tag and length of Unsupported Instruction/s. Template contains chained tags and length of the instruction / s not supported by the PCD"), tlv)),
+            0xFF03 => Err(DeviceError::TlvContent(format!("Tag and length of Failed Instruction/s. Template contains chained tags and length of the instruction / s that failed; an error number may be added"), tlv)),
+            _ => Err(DeviceError::TlvContent(format!("Expected ResponseTemplates tag"), tlv))
+        }
     }
 
-    fn read(&self, ct: &CancellationToken) -> Result<Tlv, DeviceError> {
-        loop {
-            let read_message = match self.channel.read(ct) {
-                Ok(m) => m,
-                Err(e) => match e {
-                    ReadMessageError::OperationCanceled => {
-                        return Err(DeviceError::Timeout(format!("response not received")))
-                    }
-                    ReadMessageError::Other(m) => return Err(DeviceError::MessageChannel(m)),
-                },
-            };
+    fn read(&self) -> Result<Tlv, DeviceError> {
+        let message = (match self.read_out.recv_timeout(self.read_timeout) {
+            Ok(o) => o,
+            Err(e) => match e {
+                mpsc::RecvTimeoutError::Timeout => {
+                    Err(DeviceError::Timeout(format!("recieved read")))?
+                }
+                mpsc::RecvTimeoutError::Disconnected => Err(DeviceError::MessageChannel(format!(
+                    "channel is disconnected"
+                )))?,
+            },
+        })?;
 
-            let tlv = match read_message {
+        let tlv = match message {
+            ReadMessage::Ask => {
+                return Err(DeviceError::Other(format!(
+                    "returned Ack message not expected"
+                )))
+            }
+            ReadMessage::Nack(code) => {
+                return Err(DeviceError::Other(format!(
+                    "returned Nack({}) message not expected",
+                    code
+                )))
+            }
+            ReadMessage::Do(tlv) => tlv,
+            ReadMessage::Get(tlv) => tlv,
+            ReadMessage::Set(tlv) => tlv,
+        };
+
+        return Ok(tlv);
+    }
+
+    fn read_ct(&self, ct: &CancellationToken) -> Result<Tlv, DeviceError> {
+        loop {
+            ct.result()?;
+
+            let message = (match self.read_out.try_recv() {
+                Ok(o) => o,
+                Err(e) => match e {
+                    TryRecvError::Empty => continue,
+                    TryRecvError::Disconnected => Err(DeviceError::MessageChannel(format!(
+                        "channel is disconnected"
+                    )))?,
+                },
+            })?;
+
+            let tlv = match message {
                 ReadMessage::Ask => {
                     return Err(DeviceError::Other(format!(
                         "returned Ack message not expected"
@@ -145,32 +321,7 @@ where
                         code
                     )))
                 }
-                ReadMessage::Do(tlv) => {
-                    if let Some(display_message) =
-                        tlv.get_val::<StringAsciiTagValue>("FF01 / DF46")?
-                    {
-                        if let Some(handler) = &self.external_display {
-                            handler(&display_message)
-                        }
-                        continue;
-                    }
-                    if let Some(internal_log) =
-                        tlv.get_val::<StringAsciiTagValue>("FF01 / DF8154")?
-                    {
-                        if let Some(handler) = &self.internal_log {
-                            handler(&internal_log)
-                        }
-                        continue;
-                    }
-                    if let Some(_) = tlv.find_val("FF01 / DF08") {
-                        if let Some(handler) = &self.card_removal {
-                            handler()
-                        }
-                        continue;
-                    }
-
-                    tlv
-                }
+                ReadMessage::Do(tlv) => tlv,
                 ReadMessage::Get(tlv) => tlv,
                 ReadMessage::Set(tlv) => tlv,
             };
@@ -178,63 +329,26 @@ where
             return Ok(tlv);
         }
     }
+}
 
-    fn read_timeout_success(&self) -> Result<Tlv, DeviceError> {
-        let cts = CancellationTokenSource::new();
-        cts.cancel_after(self.read_timeout);
-
-        self.read_success(&cts)
-    }
-
-    fn read_success(&self, ct: &CancellationToken) -> Result<Tlv, DeviceError> {
-        let tlv = self.read(ct)?;
-        match tlv.tag() {
-            0xFF01 => Ok(tlv),
-            0xFF02 => Err(DeviceError::TlvContent(format!("Tag and length of Unsupported Instruction/s. Template contains chained tags and length of the instruction / s not supported by the PCD"), tlv)),
-            0xFF03 => Err(DeviceError::TlvContent(format!("Tag and length of Failed Instruction/s. Template contains chained tags and length of the instruction / s that failed; an error number may be added"), tlv)),
-            _ => Err(DeviceError::TlvContent(format!("Expected ResponseTemplates tag"), tlv))
-        }
-    }
-
+impl Uno8NfcDevice {
     fn stop_macro(&self) -> Result<(), DeviceError> {
-        self.write_do(&Tlv::new(0xDF7D, Value::Nothing)?)?;
-        self.read_timeout_success()?;
+        self.write_do(Tlv::new(0xDF7D, Value::Nothing)?)?;
+        self.read_success()?;
         Ok(())
     }
 
     fn set_poll_timeout(&self, value: u16) -> Result<(), DeviceError> {
-        self.write_do(&Tlv::new_spec(0xDF8212, U16BigEndianTagValue::new(value))?)?;
-        self.read_timeout_success()?;
-        Ok(())
-    }
-
-    pub fn set_external_display_mode(&self, value: ExternalDisplayMode) -> Result<(), DeviceError> {
-        self.write_set(&Tlv::new(
-            0xDF46,
-            Value::Val(match value {
-                ExternalDisplayMode::NoExternalDisplay => [0x00].to_vec(),
-                ExternalDisplayMode::SendIndexOfPresetMessage => [0x01].to_vec(),
-                ExternalDisplayMode::SendFilteredPresetMessages => [0x02].to_vec(),
-            }),
-        )?)?;
-        self.read_timeout_success()?;
+        self.write_do(Tlv::new_spec(0xDF8212, U16BigEndianTagValue::new(value))?)?;
+        self.read_success()?;
         Ok(())
     }
 }
 
-pub enum ExternalDisplayMode {
-    NoExternalDisplay,
-    SendIndexOfPresetMessage,
-    SendFilteredPresetMessages,
-}
-
-impl<TMessageChannel> CardLessDevice for Uno8NfcDevice<TMessageChannel>
-where
-    TMessageChannel: MessageChannel,
-{
+impl CardLessDevice for Uno8NfcDevice {
     fn get_serial_number(&self) -> Result<String, DeviceError> {
-        self.write_get(&Tlv::new(0xDF4D, Value::Nothing)?)?;
-        let tlv = self.read_timeout_success()?;
+        self.write_get(Tlv::new(0xDF4D, Value::Nothing)?)?;
+        let tlv = self.read_success()?;
         match tlv.get_val::<SerialNumberTagValue>("FF01 / DF4D")? {
             Some(s) => Ok(format!(
                 "{}_{}_{}",
@@ -247,6 +361,19 @@ where
                 tlv,
             )),
         }
+    }
+
+    fn set_external_display_mode(&self, value: &ExternalDisplayMode) -> Result<(), DeviceError> {
+        self.write_set(Tlv::new(
+            0xDF46,
+            Value::Val(match value {
+                ExternalDisplayMode::NoExternalDisplay => [0x00].to_vec(),
+                ExternalDisplayMode::SendIndexOfPresetMessage => [0x01].to_vec(),
+                ExternalDisplayMode::SendFilteredPresetMessages => [0x02].to_vec(),
+            }),
+        )?)?;
+        self.read()?;
+        Ok(())
     }
 
     fn poll_emv(
@@ -268,13 +395,13 @@ where
             None => Tlv::new(0xFD, Value::Nothing)?,
         };
 
-        self.write_do(&r_tlv)?;
+        self.write_do(r_tlv)?;
 
         let dummy_ct = CancellationTokenSource::new();
 
         let mut current_ct = ct;
         loop {
-            match self.read(current_ct) {
+            match self.read_ct(current_ct) {
                 Ok(tlv) => {
                     if let Some(terminate) = tlv.get_val::<AnnexETagValue>("FF03 / F2 / DF68")? {
                         match *terminate {
@@ -295,13 +422,10 @@ where
                     ));
                 }
                 Err(e) => match e {
-                    DeviceError::Timeout(m) => match ct.is_canceled() {
-                        true => {
-                            self.stop_macro()?;
-                            current_ct = &dummy_ct;
-                        }
-                        false => return Err(DeviceError::Timeout(m)),
-                    },
+                    DeviceError::OperationCanceled => {
+                        self.stop_macro()?;
+                        current_ct = &dummy_ct
+                    }
                     _ => return Err(e),
                 },
             };
