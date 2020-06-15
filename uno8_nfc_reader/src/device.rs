@@ -16,7 +16,7 @@ use card_less_reader::{
 
 use error::*;
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
-use tag_value::{ExternalDisplayModeTagValue, SerialNumberTagValue};
+use tag_value::{ExtDisplayModeTagValue, SerialNumberTagValue};
 
 struct NotifyCallbacks {
     external_display: Option<Box<dyn Fn(&String) + Send>>,
@@ -85,7 +85,7 @@ impl Uno8NfcDevice {
             match write_in.try_recv() {
                 Ok(o) => match write_out.send(channel.write(&o)) {
                     Ok(_) => {}
-                    Err(e) => {
+                    Err(_) => {
                         log::debug!("write_in sender is disconnected");
                         break;
                     }
@@ -346,7 +346,7 @@ impl Uno8NfcDevice {
 }
 
 impl CardLessDevice for Uno8NfcDevice {
-    fn get_serial_number(&self) -> Result<String, DeviceError> {
+    fn get_sn(&self) -> Result<String, DeviceError> {
         self.write_get(Tlv::new(0xDF4D, Value::Nothing)?)?;
         let tlv = self.read_success()?;
         match tlv.get_val::<SerialNumberTagValue>("FF01 / DF4D")? {
@@ -363,24 +363,21 @@ impl CardLessDevice for Uno8NfcDevice {
         }
     }
 
-    fn get_external_display_mode(&self) -> Result<ExternalDisplayMode, DeviceError> {
+    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError> {
         self.write_get(Tlv::new(0xDF46, Value::Nothing)?)?;
 
         let tlv = self.read_success()?;
-        match tlv.get_val::<ExternalDisplayModeTagValue>("FF01 / DF46")? {
+        match tlv.get_val::<ExtDisplayModeTagValue>("FF01 / DF46")? {
             Some(s) => Ok(*s),
             None => Err(DeviceError::TlvContent(
-                format!("expected serial number tag"),
+                format!("expected external display mode tag"),
                 tlv,
             )),
         }
     }
 
-    fn set_external_display_mode(&self, value: &ExternalDisplayMode) -> Result<(), DeviceError> {
-        self.write_set(Tlv::new_spec(
-            0xDF46,
-            ExternalDisplayModeTagValue::new(*value),
-        )?)?;
+    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError> {
+        self.write_set(Tlv::new_spec(0xDF46, ExtDisplayModeTagValue::new(*value))?)?;
         self.read()?;
         Ok(())
     }
@@ -439,5 +436,34 @@ impl CardLessDevice for Uno8NfcDevice {
                 },
             };
         }
+    }
+
+    fn set_ext_display(&mut self, f: Box<dyn Fn(&String) + Send>) {
+        self.notify_callbacks.lock().unwrap().external_display = Some(f);
+    }
+}
+
+impl ExtDisplay for Uno8NfcDevice {
+    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError> {
+        self.write_get(Tlv::new(0xDF46, Value::Nothing)?)?;
+
+        let tlv = self.read_success()?;
+        match tlv.get_val::<ExtDisplayModeTagValue>("FF01 / DF46")? {
+            Some(s) => Ok(*s),
+            None => Err(DeviceError::TlvContent(
+                format!("expected external display mode tag"),
+                tlv,
+            )),
+        }
+    }
+
+    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError> {
+        self.write_set(Tlv::new_spec(0xDF46, ExtDisplayModeTagValue::new(*value))?)?;
+        self.read()?;
+        Ok(())
+    }
+
+    fn set_message_handler(&mut self, f: Box<dyn Fn(&String) + Send>) {
+        self.notify_callbacks.lock().unwrap().external_display = Some(f);
     }
 }

@@ -6,12 +6,22 @@ use cancellation::CancellationToken;
 use error::*;
 use tlv_parser::Tlv;
 
+pub trait ExtDisplay {
+    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError>;
+
+    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError>;
+
+    fn set_message_handler(&mut self, f: Box<dyn Fn(&String) + Send>);
+}
+
 pub trait CardLessDevice {
-    fn get_serial_number(&self) -> Result<String, DeviceError>;
+    fn set_ext_display(&mut self, f: Box<dyn Fn(&String) + Send>);
 
-    fn get_external_display_mode(&self) -> Result<ExternalDisplayMode, DeviceError>;
+    fn get_sn(&self) -> Result<String, DeviceError>;
 
-    fn set_external_display_mode(&self, value: &ExternalDisplayMode) -> Result<(), DeviceError>;
+    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError>;
+
+    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError>;
 
     fn poll_emv(
         &self,
@@ -43,8 +53,8 @@ pub enum PollEmvResult {
 }
 
 #[derive(Copy, Clone)]
-pub enum ExternalDisplayMode {
-    NoExternalDisplay,
-    SendIndexOfPresetMessage,
-    SendFilteredPresetMessages,
+pub enum ExtDisplayMode {
+    NoDisplay,
+    Simple,
+    Full,
 }

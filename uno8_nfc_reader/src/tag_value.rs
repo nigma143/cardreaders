@@ -1,6 +1,6 @@
 use card_less_reader::tag_value::*;
 use card_less_reader::{
-    device::ExternalDisplayMode,
+    device::ExtDisplayMode,
     tlv_parser::{TagValue, TlvError},
 };
 use std::ops::Deref;
@@ -56,12 +56,12 @@ impl TagValue for SerialNumberTagValue {
     }
 }
 
-pub struct ExternalDisplayModeTagValue {
-    val: ExternalDisplayMode,
+pub struct ExtDisplayModeTagValue {
+    val: ExtDisplayMode,
 }
 
-impl TagValue for ExternalDisplayModeTagValue {
-    type Value = ExternalDisplayMode;
+impl TagValue for ExtDisplayModeTagValue {
+    type Value = ExtDisplayMode;
 
     fn new(val: Self::Value) -> Self {
         Self { val: val }
@@ -78,9 +78,9 @@ impl TagValue for ExternalDisplayModeTagValue {
         Ok(Self {
             val: match raw.first() {
                 Some(a) => match a {
-                    0x00 => ExternalDisplayMode::NoExternalDisplay,
-                    0x01 => ExternalDisplayMode::SendIndexOfPresetMessage,
-                    0x02 => ExternalDisplayMode::SendFilteredPresetMessages,
+                    0x00 => ExtDisplayMode::NoDisplay,
+                    0x01 => ExtDisplayMode::Simple,
+                    0x02 => ExtDisplayMode::Full,
                     _ => {
                         return Err(TlvError::ParseTagValue(format!(
                             "unknown ExternalDisplayMode code {:02X}",
@@ -95,15 +95,15 @@ impl TagValue for ExternalDisplayModeTagValue {
 
     fn bytes(&self) -> Vec<u8> {
         match self.val {
-            ExternalDisplayMode::NoExternalDisplay => [0x00].to_vec(),
-            ExternalDisplayMode::SendIndexOfPresetMessage => [0x01].to_vec(),
-            ExternalDisplayMode::SendFilteredPresetMessages => [0x02].to_vec(),
+            ExtDisplayMode::NoDisplay => [0x00].to_vec(),
+            ExtDisplayMode::Simple => [0x01].to_vec(),
+            ExtDisplayMode::Full => [0x02].to_vec(),
         }
     }
 }
 
-impl Deref for ExternalDisplayModeTagValue {
-    type Target = ExternalDisplayMode;
+impl Deref for ExtDisplayModeTagValue {
+    type Target = ExtDisplayMode;
     fn deref(&self) -> &Self::Target {
         &self.val
     }

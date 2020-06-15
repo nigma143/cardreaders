@@ -5,6 +5,7 @@ use std::time::Duration;
 
 use hidapi::{HidApi, HidDevice, HidError};
 
+use card_less_reader::device::CardLessDevice;
 use device::Uno8NfcDevice;
 use message_channel::MessageChannel;
 
