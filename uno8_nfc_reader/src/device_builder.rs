@@ -1,13 +1,10 @@
 use crate::device;
-use crate::message_channel;
 
 use std::time::Duration;
 
-use hidapi::{HidApi, HidDevice, HidError};
+use hidapi::{HidApi, HidError};
 
-use card_less_reader::device::CardLessDevice;
 use device::Uno8NfcDevice;
-use message_channel::MessageChannel;
 
 pub struct Uno8NfcDeviceBuilder {
     device: Uno8NfcDevice,

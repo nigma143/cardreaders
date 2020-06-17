@@ -1,22 +1,11 @@
 use crate::error;
 use crate::tlv_parser;
 
-use cancellation::CancellationToken;
-
 use error::*;
+use std::sync::{atomic::AtomicBool, Arc};
 use tlv_parser::Tlv;
 
-pub trait ExtDisplay {
-    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError>;
-
-    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError>;
-
-    fn set_message_handler(&mut self, f: Box<dyn Fn(&String) + Send>);
-}
-
 pub trait CardLessDevice {
-    fn set_ext_display(&mut self, f: Box<dyn Fn(&String) + Send>);
-
     fn get_sn(&self) -> Result<String, DeviceError>;
 
     fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError>;
@@ -26,7 +15,7 @@ pub trait CardLessDevice {
     fn poll_emv(
         &self,
         purchase: Option<PollEmvPurchase>,
-        ct: &CancellationToken,
+        cancel_flag: Arc<AtomicBool>,
     ) -> Result<PollEmvResult, DeviceError>;
 }
 

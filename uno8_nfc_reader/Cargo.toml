@@ -10,7 +10,6 @@ edition = "2018"
 card_less_reader = { path = "../card_less_reader" }
 
 hidapi = ""
-cancellation = ""
 thiserror = ""
 log = ""
 byteorder = ""

@@ -1,28 +1,23 @@
-use cancellation::{CancellationToken, CancellationTokenSource};
-
 use card_less_reader::device::*;
 use uno8_nfc_reader::device_builder::Uno8NfcDeviceBuilder;
 
-use cursive::event::{Event, Key};
 use cursive::menu::MenuTree;
 use cursive::traits::*;
-use cursive::views::{Button, DummyView, LinearLayout, TextView};
-use cursive::views::{Dialog, EditView, OnEventView, RadioButton, RadioGroup, TextArea};
+use cursive::views::{LinearLayout, TextView};
+use cursive::views::{Dialog, EditView, RadioGroup};
 use cursive::Cursive;
-use cursive::{align::HAlign, Printer, Vec2};
-use hidapi::HidApi;
-use mpsc::{Receiver, Sender};
+
+
 use std::sync::{Arc, Mutex};
 use std::{
-    collections::VecDeque,
-    sync::{mpsc, MutexGuard, PoisonError},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+    },
     thread,
-    time::Duration,
 };
 
 struct Session {
-    device: Box<(dyn CardLessDevice + Send)>,
-    display_source: Receiver<String>
+    device: Mutex<Box<(dyn CardLessDevice + Send)>>
 }
 
 fn main() {
@@ -80,20 +75,28 @@ fn connection(view: &mut Cursive) {
                     })
                     .unwrap();
 
+                let cb_sink = x.cb_sink().clone();
+
                 match Uno8NfcDeviceBuilder::use_hid(vid, pid) {
                     Ok(o) => {
-                        let (display_tx, display_rx) = mpsc::channel();
-
                         let device = o
-                            .set_external_display(move |x| display_tx.send(x.to_owned()).unwrap())
+                            .set_external_display(move |x| {
+                                let message = format!("{}", x);
+                                cb_sink
+                                    .send(Box::new(move |y: &mut cursive::Cursive| {
+                                        y.call_on_name("external_display", |d: &mut TextView| {
+                                            d.set_content(message)
+                                        });
+                                    }))
+                                    .unwrap()
+                            })
                             .set_internal_log(|x| log::info!("InternalLog: {}", x))
                             .set_card_removal(|| log::info!("CardRemoval"))
                             .finish();
 
-                        x.set_user_data(Arc::new(Mutex::new(Session {
-                            device: Box::new(device),
-                            display_source: display_rx
-                        })));
+                        x.set_user_data(Arc::new(Session {
+                            device: Mutex::new(Box::new(device))
+                        }));
 
                         x.pop_layer();
                         home(x);
@@ -121,8 +124,9 @@ fn home(view: &mut Cursive) {
 }
 
 fn get_sn_cmd(view: &mut Cursive) {
-    let session: &mut Arc<Mutex<Session>> = view.user_data().unwrap();
-    match Arc::clone(session).lock().unwrap().device.get_sn() {
+    let session = view.user_data::<Arc<Session>>().unwrap().clone();
+    let device = session.device.lock().unwrap();
+    match device.get_sn() {
         Ok(o) => view.add_layer(Dialog::info(format!("{}", o))),
         Err(e) => view.add_layer(Dialog::info(format!("{}", e))),
     };
@@ -131,22 +135,18 @@ fn get_sn_cmd(view: &mut Cursive) {
 fn ext_display_mode_cmd(view: &mut Cursive) {
     let mut mode: RadioGroup<ExtDisplayMode> = RadioGroup::new();
 
-    let mut no_ext_button = mode.button(ExtDisplayMode::NoDisplay, "NoExternalDisplay");
-    let mut send_i_button = mode.button(ExtDisplayMode::Simple, "SendIndexOfPresetMessage");
-    let mut send_f_button = mode.button(ExtDisplayMode::Full, "SendFilteredPresetMessages");
+    let mut no_ext_b = mode.button(ExtDisplayMode::NoDisplay, "NoExternalDisplay");
+    let mut send_i_b = mode.button(ExtDisplayMode::Simple, "SendIndexOfPresetMessage");
+    let mut send_f_b = mode.button(ExtDisplayMode::Full, "SendFilteredPresetMessages");
 
-    let session: &mut Arc<Mutex<Session>> = view.user_data().unwrap();
-    match Arc::clone(session)
-        .lock()
-        .unwrap()
-        .device
-        .get_ext_display_mode()
-    {
+    let session = view.user_data::<Arc<Session>>().unwrap().clone();
+    let device = session.device.lock().unwrap();
+    match device.get_ext_display_mode() {
         Ok(o) => {
             match o {
-                ExtDisplayMode::NoDisplay => no_ext_button.select(),
-                ExtDisplayMode::Simple => send_i_button.select(),
-                ExtDisplayMode::Full => send_f_button.select(),
+                ExtDisplayMode::NoDisplay => no_ext_b.select(),
+                ExtDisplayMode::Simple => send_i_b.select(),
+                ExtDisplayMode::Full => send_f_b.select(),
             };
         }
         Err(e) => {
@@ -160,28 +160,24 @@ fn ext_display_mode_cmd(view: &mut Cursive) {
             .title("External display mode")
             .content(
                 LinearLayout::vertical()
-                    .child(no_ext_button)
-                    .child(send_i_button)
-                    .child(send_f_button),
+                    .child(no_ext_b)
+                    .child(send_i_b)
+                    .child(send_f_b),
             )
-            .button("Ok", move |s| {
+            .button("Ok", move |x| {
                 let mode = mode.selection();
 
-                let session: &mut Arc<Mutex<Session>> = s.user_data().unwrap();
-                match Arc::clone(session)
-                    .lock()
-                    .unwrap()
-                    .device
-                    .set_ext_display_mode(&mode)
-                {
-                    Ok(o) => {
-                        s.pop_layer();
+                let session = x.user_data::<Arc<Session>>().unwrap().clone();
+                let device = session.device.lock().unwrap();
+                match device.set_ext_display_mode(&mode) {
+                    Ok(_) => {
+                        x.pop_layer();
                     }
-                    Err(e) => s.add_layer(Dialog::info(format!("{}", e))),
+                    Err(e) => x.add_layer(Dialog::info(format!("{}", e))),
                 }
             })
-            .button("Cancel", move |s| {
-                s.pop_layer();
+            .button("Cancel", move |x| {
+                x.pop_layer();
             }),
     );
 }
@@ -227,14 +223,14 @@ fn poll_emv(view: &mut Cursive) {
                     ),
             )
             .button("Ok", |x| {
-                let cts = CancellationTokenSource::new();
-                let ct = cts.token().clone();
+                let cancel_flag = Arc::new(AtomicBool::new(false));
+                let cancel_flag_ref = cancel_flag.clone();
 
                 x.add_layer(
-                    Dialog::text("wait")
-                        .content(TextView::new("").with_name("display"))
-                        .button("Cancel", move |y| {
-                            cts.cancel();
+                    Dialog::new().title("Waiting card")
+                        .content(TextView::new("").with_name("external_display"))
+                        .button("Cancel", move |y| {                            
+                            cancel_flag.store(true, Ordering::SeqCst);
                             y.pop_layer();
                         }),
                 );
@@ -256,34 +252,20 @@ fn poll_emv(view: &mut Cursive) {
                     .parse()
                     .unwrap();
 
-                let session: &mut Arc<Mutex<Session>> = x.user_data().unwrap();
-
-                let session_ref = Arc::clone(session);
+                let session = x.user_data::<Arc<Session>>().unwrap().clone();
                 let sb_sink = x.cb_sink().clone();
-                let sb_sink2 = x.cb_sink().clone();
 
                 thread::spawn(move || {
-                    let mut session = session_ref.lock().unwrap();
+                    let device = session.device.lock().unwrap();
 
-                    session.device.set_ext_display(Box::new(move |x| {
-                        let message = format!("{}", x);
-                        sb_sink
-                            .send(Box::new(move |y: &mut cursive::Cursive| {
-                                y.call_on_name("display", |d: &mut TextView| {
-                                    d.set_content(message)
-                                });
-                            }))
-                            .unwrap()
-                    }));
-
-                    match session.device.poll_emv(
+                    match device.poll_emv(
                         Some(PollEmvPurchase::new(p_type, currency_code, amount)),
-                        &ct,
+                        cancel_flag_ref,
                     ) {
                         Ok(o) => match o {
                             PollEmvResult::Canceled => {}
                             PollEmvResult::Success(tlv) => {
-                                sb_sink2
+                                sb_sink
                                     .send(Box::new(move |x: &mut cursive::Cursive| {
                                         x.pop_layer();
                                         x.add_layer(Dialog::info(format!("{}", tlv)))
@@ -292,7 +274,7 @@ fn poll_emv(view: &mut Cursive) {
                             }
                         },
                         Err(e) => {
-                            sb_sink2
+                            sb_sink
                                 .send(Box::new(move |x: &mut cursive::Cursive| {
                                     x.pop_layer();
                                     x.add_layer(Dialog::info(format!("{}", e)))
@@ -306,59 +288,4 @@ fn poll_emv(view: &mut Cursive) {
                 x.pop_layer();
             }),
     );
-}
-
-fn generate_logs(tx: &mpsc::Sender<String>, cb_sink: cursive::CbSink) {
-    let mut i = 1;
-    loop {
-        let line = format!("Interesting log line {}", i);
-        i += 1;
-        // The send will fail when the other side is dropped.
-        // (When the application ends).
-        if tx.send(line).is_err() {
-            return;
-        }
-        cb_sink.send(Box::new(Cursive::noop)).unwrap();
-        thread::sleep(Duration::from_millis(30));
-    }
-}
-
-// Let's define a buffer view, that shows the last lines from a stream.
-struct BufferView {
-    // We'll use a ring buffer
-    buffer: VecDeque<String>,
-    // Receiving end of the stream
-    rx: mpsc::Receiver<String>,
-}
-
-impl BufferView {
-    // Creates a new view with the given buffer size
-    fn new(size: usize, rx: mpsc::Receiver<String>) -> Self {
-        let mut buffer = VecDeque::new();
-        buffer.resize(size, String::new());
-        BufferView { rx, buffer }
-    }
-
-    // Reads available data from the stream into the buffer
-    fn update(&mut self) {
-        // Add each available line to the end of the buffer.
-        while let Ok(line) = self.rx.try_recv() {
-            self.buffer.push_back(line);
-            self.buffer.pop_front();
-        }
-    }
-}
-
-impl View for BufferView {
-    fn layout(&mut self, _: Vec2) {
-        // Before drawing, we'll want to update the buffer
-        self.update();
-    }
-
-    fn draw(&self, printer: &Printer) {
-        // Print the end of the buffer
-        for (i, line) in self.buffer.iter().rev().take(printer.size.y).enumerate() {
-            printer.print((0, printer.size.y - 1 - i), line);
-        }
-    }
 }

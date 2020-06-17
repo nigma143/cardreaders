@@ -2,14 +2,12 @@ use crate::error;
 use crate::message_channel;
 
 use byteorder::{BigEndian, ByteOrder};
-use cancellation::CancellationToken;
 use hidapi::{HidDevice, HidError};
 
 use error::*;
 
 use card_less_reader::tlv_parser::{Tlv, TlvError};
 use message_channel::{MessageChannel, ReadMessage, WriteMessage};
-use std::{thread, time::Duration};
 
 impl MessageChannel for HidDevice {
     fn write(&self, message: &WriteMessage) -> Result<(), WriteMessageError> {

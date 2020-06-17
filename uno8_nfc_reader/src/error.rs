@@ -1,4 +1,3 @@
-use cancellation::OperationCanceled;
 use card_less_reader::error::*;
 use thiserror::Error;
 

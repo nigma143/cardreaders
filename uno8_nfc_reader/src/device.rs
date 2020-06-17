@@ -3,10 +3,12 @@ use crate::message_channel;
 use crate::tag_value;
 
 use std::sync::mpsc::{self, Receiver, Sender, TryRecvError};
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
 use std::{thread, time::Duration};
 
-use cancellation::{CancellationToken, CancellationTokenSource};
 use card_less_reader::{
     device::*,
     error::*,
@@ -25,11 +27,9 @@ struct NotifyCallbacks {
 }
 
 pub struct Uno8NfcDevice {
-    write_in: Sender<WriteMessage>,
-    write_out: Receiver<Result<(), WriteMessageError>>,
+    write_in: Sender<(WriteMessage, Sender<Result<(), WriteMessageError>>)>,
     read_out: Receiver<Result<ReadMessage, ReadMessageError>>,
 
-    //channel: TMessageChannel,
     write_timeout: Duration,
     read_timeout: Duration,
     ask_timeout: Duration,
@@ -40,7 +40,6 @@ pub struct Uno8NfcDevice {
 impl Uno8NfcDevice {
     pub fn new(channel: impl MessageChannel + Send + 'static) -> Self {
         let (write_in_tx, write_in_rx) = mpsc::channel();
-        let (write_out_tx, write_out_rx) = mpsc::channel();
         let (read_out_tx, read_out_rx) = mpsc::channel();
 
         let notify_callbacks = Arc::new(Mutex::new(NotifyCallbacks {
@@ -56,14 +55,12 @@ impl Uno8NfcDevice {
                 channel,
                 notify_callbacks_ref,
                 write_in_rx,
-                write_out_tx,
                 read_out_tx,
             )
         });
 
         Self {
             write_in: write_in_tx,
-            write_out: write_out_rx,
             read_out: read_out_rx,
 
             write_timeout: Duration::from_millis(30),
@@ -77,13 +74,12 @@ impl Uno8NfcDevice {
     fn channel_loop(
         channel: impl MessageChannel,
         notify_callbacks: Arc<Mutex<NotifyCallbacks>>,
-        write_in: Receiver<WriteMessage>,
-        write_out: Sender<Result<(), WriteMessageError>>,
+        write_in: Receiver<(WriteMessage, Sender<Result<(), WriteMessageError>>)>,
         read_out: Sender<Result<ReadMessage, ReadMessageError>>,
     ) {
         loop {
             match write_in.try_recv() {
-                Ok(o) => match write_out.send(channel.write(&o)) {
+                Ok((m, tx)) => match tx.send(channel.write(&m)) {
                     Ok(_) => {}
                     Err(_) => {
                         log::debug!("write_in sender is disconnected");
@@ -129,7 +125,7 @@ impl Uno8NfcDevice {
 
                             match read_out.send(Ok(o)) {
                                 Ok(_) => {}
-                                Err(e) => {
+                                Err(_) => {
                                     log::debug!("read_out receiver is disconnected");
                                     break;
                                 }
@@ -140,7 +136,7 @@ impl Uno8NfcDevice {
                             TryReadMessageError::Other(m) => {
                                 match read_out.send(Err(ReadMessageError::Other(m))) {
                                     Ok(_) => {}
-                                    Err(e) => {
+                                    Err(_) => {
                                         log::debug!("read_out receiver is disconnected");
                                         break;
                                     }
@@ -209,11 +205,13 @@ impl Uno8NfcDevice {
     }
 
     fn write(&self, message: WriteMessage) -> Result<(), DeviceError> {
-        self.write_in
-            .send(message)
-            .map_err(|x| DeviceError::MessageChannel(format!("send write message fail")))?;
+        let (w_tx, w_rx) = mpsc::channel();
 
-        match self.write_out.recv_timeout(self.write_timeout) {
+        self.write_in
+            .send((message, w_tx))
+            .map_err(|_| DeviceError::MessageChannel(format!("send write message fail")))?;
+
+        match w_rx.recv_timeout(self.write_timeout) {
             Ok(o) => o?,
             Err(e) => match e {
                 mpsc::RecvTimeoutError::Timeout => {
@@ -295,9 +293,11 @@ impl Uno8NfcDevice {
         return Ok(tlv);
     }
 
-    fn read_ct(&self, ct: &CancellationToken) -> Result<Tlv, DeviceError> {
+    fn read_ct(&self, cancel_flag: Arc<AtomicBool>) -> Result<Tlv, DeviceError> {
         loop {
-            ct.result()?;
+            if cancel_flag.load(Ordering::SeqCst) {
+                Err(DeviceError::OperationCanceled)?
+            }
 
             let message = (match self.read_out.try_recv() {
                 Ok(o) => o,
@@ -310,17 +310,13 @@ impl Uno8NfcDevice {
             })?;
 
             let tlv = match message {
-                ReadMessage::Ask => {
-                    return Err(DeviceError::Other(format!(
-                        "returned Ack message not expected"
-                    )))
-                }
-                ReadMessage::Nack(code) => {
-                    return Err(DeviceError::Other(format!(
-                        "returned Nack({}) message not expected",
-                        code
-                    )))
-                }
+                ReadMessage::Ask => Err(DeviceError::Other(format!(
+                    "returned Ack message not expected"
+                )))?,
+                ReadMessage::Nack(code) => Err(DeviceError::Other(format!(
+                    "returned Nack({}) message not expected",
+                    code
+                )))?,
                 ReadMessage::Do(tlv) => tlv,
                 ReadMessage::Get(tlv) => tlv,
                 ReadMessage::Set(tlv) => tlv,
@@ -385,7 +381,7 @@ impl CardLessDevice for Uno8NfcDevice {
     fn poll_emv(
         &self,
         purchase: Option<PollEmvPurchase>,
-        ct: &CancellationToken,
+        cancel_flag: Arc<AtomicBool>,
     ) -> Result<PollEmvResult, DeviceError> {
         self.set_poll_timeout(0)?;
 
@@ -403,11 +399,11 @@ impl CardLessDevice for Uno8NfcDevice {
 
         self.write_do(r_tlv)?;
 
-        let dummy_ct = CancellationTokenSource::new();
+        let dummy_ct = Arc::new(AtomicBool::new(false));
 
-        let mut current_ct = ct;
+        let mut current_ct = cancel_flag;
         loop {
-            match self.read_ct(current_ct) {
+            match self.read_ct(current_ct.clone()) {
                 Ok(tlv) => {
                     if let Some(terminate) = tlv.get_val::<AnnexETagValue>("FF03 / F2 / DF68")? {
                         match *terminate {
@@ -422,48 +418,19 @@ impl CardLessDevice for Uno8NfcDevice {
                         return Ok(PollEmvResult::Success(tlv));
                     }
 
-                    return Err(DeviceError::TlvContent(
+                    Err(DeviceError::TlvContent(
                         format!("invalid response TLV"),
                         tlv,
-                    ));
+                    ))?;
                 }
                 Err(e) => match e {
                     DeviceError::OperationCanceled => {
                         self.stop_macro()?;
-                        current_ct = &dummy_ct
+                        current_ct = dummy_ct.clone()
                     }
-                    _ => return Err(e),
+                    _ => Err(e)?,
                 },
             };
         }
-    }
-
-    fn set_ext_display(&mut self, f: Box<dyn Fn(&String) + Send>) {
-        self.notify_callbacks.lock().unwrap().external_display = Some(f);
-    }
-}
-
-impl ExtDisplay for Uno8NfcDevice {
-    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError> {
-        self.write_get(Tlv::new(0xDF46, Value::Nothing)?)?;
-
-        let tlv = self.read_success()?;
-        match tlv.get_val::<ExtDisplayModeTagValue>("FF01 / DF46")? {
-            Some(s) => Ok(*s),
-            None => Err(DeviceError::TlvContent(
-                format!("expected external display mode tag"),
-                tlv,
-            )),
-        }
-    }
-
-    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError> {
-        self.write_set(Tlv::new_spec(0xDF46, ExtDisplayModeTagValue::new(*value))?)?;
-        self.read()?;
-        Ok(())
-    }
-
-    fn set_message_handler(&mut self, f: Box<dyn Fn(&String) + Send>) {
-        self.notify_callbacks.lock().unwrap().external_display = Some(f);
     }
 }
