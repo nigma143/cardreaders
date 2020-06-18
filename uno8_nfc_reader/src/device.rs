@@ -51,12 +51,7 @@ impl Uno8NfcDevice {
         let notify_callbacks_ref = notify_callbacks.clone();
 
         thread::spawn(move || {
-            Self::channel_loop(
-                channel,
-                notify_callbacks_ref,
-                write_in_rx,
-                read_out_tx,
-            )
+            Self::channel_loop(channel, notify_callbacks_ref, write_in_rx, read_out_tx)
         });
 
         Self {
@@ -82,7 +77,7 @@ impl Uno8NfcDevice {
                 Ok((m, tx)) => match tx.send(channel.write(&m)) {
                     Ok(_) => {}
                     Err(_) => {
-                        log::debug!("write_in sender is disconnected");
+                        log::debug!("write_in receiver is disconnected");
                         break;
                     }
                 },
@@ -144,11 +139,14 @@ impl Uno8NfcDevice {
                             }
                         },
                     },
-                    TryRecvError::Disconnected => panic!("Disconnected"),
+                    TryRecvError::Disconnected => {
+                        log::debug!("write_in sender is disconnected");
+                        break;
+                    },
                 },
             }
 
-            thread::sleep(Duration::from_millis(10));
+            thread::sleep(Duration::from_millis(1));
         }
     }
 }
@@ -210,7 +208,7 @@ impl Uno8NfcDevice {
         self.write_in
             .send((message, w_tx))
             .map_err(|_| DeviceError::MessageChannel(format!("send write message fail")))?;
-
+       
         match w_rx.recv_timeout(self.write_timeout) {
             Ok(o) => o?,
             Err(e) => match e {
@@ -285,9 +283,7 @@ impl Uno8NfcDevice {
                     code
                 )))
             }
-            ReadMessage::Do(tlv) => tlv,
-            ReadMessage::Get(tlv) => tlv,
-            ReadMessage::Set(tlv) => tlv,
+            ReadMessage::Do(tlv) | ReadMessage::Get(tlv) | ReadMessage::Set(tlv) => tlv,
         };
 
         return Ok(tlv);
@@ -302,7 +298,10 @@ impl Uno8NfcDevice {
             let message = (match self.read_out.try_recv() {
                 Ok(o) => o,
                 Err(e) => match e {
-                    TryRecvError::Empty => continue,
+                    TryRecvError::Empty => {
+                        thread::sleep(Duration::from_millis(1));
+                        continue;
+                    }
                     TryRecvError::Disconnected => Err(DeviceError::MessageChannel(format!(
                         "channel is disconnected"
                     )))?,
@@ -317,9 +316,7 @@ impl Uno8NfcDevice {
                     "returned Nack({}) message not expected",
                     code
                 )))?,
-                ReadMessage::Do(tlv) => tlv,
-                ReadMessage::Get(tlv) => tlv,
-                ReadMessage::Set(tlv) => tlv,
+                ReadMessage::Do(tlv) | ReadMessage::Get(tlv) | ReadMessage::Set(tlv) => tlv,
             };
 
             return Ok(tlv);
@@ -357,25 +354,6 @@ impl CardLessDevice for Uno8NfcDevice {
                 tlv,
             )),
         }
-    }
-
-    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError> {
-        self.write_get(Tlv::new(0xDF46, Value::Nothing)?)?;
-
-        let tlv = self.read_success()?;
-        match tlv.get_val::<ExtDisplayModeTagValue>("FF01 / DF46")? {
-            Some(s) => Ok(*s),
-            None => Err(DeviceError::TlvContent(
-                format!("expected external display mode tag"),
-                tlv,
-            )),
-        }
-    }
-
-    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError> {
-        self.write_set(Tlv::new_spec(0xDF46, ExtDisplayModeTagValue::new(*value))?)?;
-        self.read()?;
-        Ok(())
     }
 
     fn poll_emv(
@@ -432,5 +410,28 @@ impl CardLessDevice for Uno8NfcDevice {
                 },
             };
         }
+    }
+
+    fn ext_display_supported(&self) -> bool {
+        true
+    }
+
+    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError> {
+        self.write_get(Tlv::new(0xDF46, Value::Nothing)?)?;
+
+        let tlv = self.read_success()?;
+        match tlv.get_val::<ExtDisplayModeTagValue>("FF01 / DF46")? {
+            Some(s) => Ok(*s),
+            None => Err(DeviceError::TlvContent(
+                format!("expected external display mode tag"),
+                tlv,
+            )),
+        }
+    }
+
+    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError> {
+        self.write_set(Tlv::new_spec(0xDF46, ExtDisplayModeTagValue::new(*value))?)?;
+        self.read()?;
+        Ok(())
     }
 }

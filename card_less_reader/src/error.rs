@@ -5,6 +5,8 @@ use tlv_parser::{Tlv, TlvError};
 
 #[derive(Error, Debug)]
 pub enum DeviceError {
+    #[error("not supported")]
+    NotSupported,
     #[error("operation canceled")]
     OperationCanceled,
     #[error("timeout: {0}")]

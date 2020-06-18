@@ -3,21 +3,18 @@ use uno8_nfc_reader::device_builder::Uno8NfcDeviceBuilder;
 
 use cursive::menu::MenuTree;
 use cursive::traits::*;
-use cursive::views::{LinearLayout, TextView};
 use cursive::views::{Dialog, EditView, RadioGroup};
+use cursive::views::{LinearLayout, TextView};
 use cursive::Cursive;
-
 
 use std::sync::{Arc, Mutex};
 use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-    },
+    sync::atomic::{AtomicBool, Ordering},
     thread,
 };
 
 struct Session {
-    device: Mutex<Box<(dyn CardLessDevice + Send)>>
+    device: Mutex<Box<dyn CardLessDevice>>,
 }
 
 fn main() {
@@ -95,7 +92,7 @@ fn connection(view: &mut Cursive) {
                             .finish();
 
                         x.set_user_data(Arc::new(Session {
-                            device: Mutex::new(Box::new(device))
+                            device: Mutex::new(Box::new(device)),
                         }));
 
                         x.pop_layer();
@@ -109,14 +106,20 @@ fn connection(view: &mut Cursive) {
 }
 
 fn home(view: &mut Cursive) {
+    let session = view.user_data::<Arc<Session>>().unwrap().clone();
+    let device = session.device.lock().unwrap();
+
+    let mut commands = MenuTree::new();
+    commands.add_leaf("Get serial number", |x| get_sn_cmd(x));
+
+    if device.ext_display_supported() {
+        commands.add_leaf("External display mode", |x| ext_display_mode_cmd(x));
+    }
+
+    commands.add_leaf("Poll emv", |x| poll_emv(x));
+
     view.menubar()
-        .add_subtree(
-            "Commands",
-            MenuTree::new()
-                .leaf("Get serial number", |x| get_sn_cmd(x))
-                .leaf("External display mode", |x| ext_display_mode_cmd(x))
-                .leaf("Poll emv", |x| poll_emv(x)),
-        )
+        .add_subtree("Commands", commands)
         .add_delimiter()
         .add_leaf("Quit", |s| s.quit());
 
@@ -126,6 +129,7 @@ fn home(view: &mut Cursive) {
 fn get_sn_cmd(view: &mut Cursive) {
     let session = view.user_data::<Arc<Session>>().unwrap().clone();
     let device = session.device.lock().unwrap();
+
     match device.get_sn() {
         Ok(o) => view.add_layer(Dialog::info(format!("{}", o))),
         Err(e) => view.add_layer(Dialog::info(format!("{}", e))),
@@ -227,9 +231,10 @@ fn poll_emv(view: &mut Cursive) {
                 let cancel_flag_ref = cancel_flag.clone();
 
                 x.add_layer(
-                    Dialog::new().title("Waiting card")
+                    Dialog::new()
+                        .title("Waiting card")
                         .content(TextView::new("").with_name("external_display"))
-                        .button("Cancel", move |y| {                            
+                        .button("Cancel", move |y| {
                             cancel_flag.store(true, Ordering::SeqCst);
                             y.pop_layer();
                         }),

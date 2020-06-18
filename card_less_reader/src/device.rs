@@ -5,18 +5,27 @@ use error::*;
 use std::sync::{atomic::AtomicBool, Arc};
 use tlv_parser::Tlv;
 
-pub trait CardLessDevice {
+pub trait CardLessDevice : Send {
     fn get_sn(&self) -> Result<String, DeviceError>;
-
-    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError>;
-
-    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError>;
 
     fn poll_emv(
         &self,
         purchase: Option<PollEmvPurchase>,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<PollEmvResult, DeviceError>;
+
+    
+    fn ext_display_supported(&self) -> bool {
+        false
+    }
+
+    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError> {
+        Err(DeviceError::NotSupported)
+    }
+
+    fn set_ext_display_mode(&self, _: &ExtDisplayMode) -> Result<(), DeviceError> {
+        Err(DeviceError::NotSupported)
+    }
 }
 
 #[derive(Debug)]
