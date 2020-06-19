@@ -12,12 +12,117 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     thread,
 };
+/*
+enum Device {
+    Device1(dyn CardLessDevice),
+    Device2(dyn CardLessDevice + ExtDisplay)
+}*/
+
+struct DeviceGui<T>
+where
+    T: CardLessDevice,
+{
+    device: T,
+    menu: MenuTree,
+}
+
+impl<T: CardLessDevice> DeviceGui<T> {
+    fn simple(device: T) -> Self {
+        /*let mut this = Self {
+            device: device,
+            menu: MenuTree::new()
+        };
+
+        this.menu.add_leaf("Get serial number", |x| this.get_sn_cmd(x));
+        this.menu.add_leaf("Poll emv", |x| poll_emv(x));
+*/
+        Self {
+            device: device,
+            menu: MenuTree::new()
+                .leaf("Get serial number", |x| self::get_sn_cmd(x))
+                .leaf("Poll emv", |x| poll_emv(x)),
+        }
+    }
+
+    fn run(&self, view: &mut Cursive) {
+        /*view.menubar()
+            .add_subtree("Commands", self.menu)
+            .add_delimiter()
+            .add_leaf("Quit", |s| s.quit());
+
+        view.set_autohide_menu(false);*/
+    }
+
+    fn get_sn_cmd(&self, view: &mut Cursive) {    
+        match self.device.get_sn() {
+            Ok(o) => view.add_layer(Dialog::info(format!("{}", o))),
+            Err(e) => view.add_layer(Dialog::info(format!("{}", e))),
+        };
+    }
+}
+
+impl<T: CardLessDevice + ExtDisplay> DeviceGui<T> {
+    fn with_ext_display(device: T) -> Self {
+        let mut g = DeviceGui::simple(device);
+        g.menu
+            .add_leaf("External display mode", |x| ext_display_mode_cmd(x));
+
+        g.device.get_display_mode();
+
+        g
+    }
+}
+
+struct D1 {}
+impl CardLessDevice for D1 {
+    fn get_sn(&self) -> Result<String, card_less_reader::error::DeviceError> {
+        todo!()
+    }
+    fn poll_emv(
+        &self,
+        purchase: Option<PollEmvPurchase>,
+        cancel_flag: Arc<AtomicBool>,
+    ) -> Result<PollEmvResult, card_less_reader::error::DeviceError> {
+        todo!()
+    }
+}
+
+struct D2 {}
+impl CardLessDevice for D2 {
+    fn get_sn(&self) -> Result<String, card_less_reader::error::DeviceError> {
+        todo!()
+    }
+    fn poll_emv(
+        &self,
+        purchase: Option<PollEmvPurchase>,
+        cancel_flag: Arc<AtomicBool>,
+    ) -> Result<PollEmvResult, card_less_reader::error::DeviceError> {
+        todo!()
+    }
+}
+impl ExtDisplay for D2 {
+    fn get_display_mode(&self) -> Result<ExtDisplayMode, card_less_reader::error::DeviceError> {
+        todo!()
+    }
+    fn set_display_mode(
+        &self,
+        _: &ExtDisplayMode,
+    ) -> Result<(), card_less_reader::error::DeviceError> {
+        todo!()
+    }
+}
 
 struct Session {
     device: Mutex<Box<dyn CardLessDevice>>,
 }
 
 fn main() {
+    //let d1Gui = DeviceGui::simple(D1 {});
+
+    //let d2Gui = DeviceGui::with_ext_display(D2 {});
+
+    //d2Gui.run2();
+
     // Initialize the cursive logger.
     cursive::logger::init();
 
@@ -112,7 +217,7 @@ fn home(view: &mut Cursive) {
     let mut commands = MenuTree::new();
     commands.add_leaf("Get serial number", |x| get_sn_cmd(x));
 
-    if device.ext_display_supported() {
+    if let Some(x) = device.ext_dysplay()  {
         commands.add_leaf("External display mode", |x| ext_display_mode_cmd(x));
     }
 
@@ -145,7 +250,7 @@ fn ext_display_mode_cmd(view: &mut Cursive) {
 
     let session = view.user_data::<Arc<Session>>().unwrap().clone();
     let device = session.device.lock().unwrap();
-    match device.get_ext_display_mode() {
+    match device.ext_dysplay().unwrap().get_display_mode() {
         Ok(o) => {
             match o {
                 ExtDisplayMode::NoDisplay => no_ext_b.select(),
@@ -173,7 +278,7 @@ fn ext_display_mode_cmd(view: &mut Cursive) {
 
                 let session = x.user_data::<Arc<Session>>().unwrap().clone();
                 let device = session.device.lock().unwrap();
-                match device.set_ext_display_mode(&mode) {
+                match device.ext_dysplay().unwrap().set_display_mode(&mode) {
                     Ok(_) => {
                         x.pop_layer();
                     }

@@ -142,7 +142,7 @@ impl Uno8NfcDevice {
                     TryRecvError::Disconnected => {
                         log::debug!("write_in sender is disconnected");
                         break;
-                    },
+                    }
                 },
             }
 
@@ -207,17 +207,17 @@ impl Uno8NfcDevice {
 
         self.write_in
             .send((message, w_tx))
-            .map_err(|_| DeviceError::MessageChannel(format!("send write message fail")))?;
-       
+            .map_err(|_| DeviceError::MessageChannel("send write message fail".into()))?;
+
         match w_rx.recv_timeout(self.write_timeout) {
             Ok(o) => o?,
             Err(e) => match e {
                 mpsc::RecvTimeoutError::Timeout => {
-                    Err(DeviceError::Timeout(format!("recieved write result")))?
+                    Err(DeviceError::Timeout("recieved write result".into()))?
                 }
-                mpsc::RecvTimeoutError::Disconnected => Err(DeviceError::MessageChannel(format!(
-                    "channel is disconnected"
-                )))?,
+                mpsc::RecvTimeoutError::Disconnected => Err(DeviceError::MessageChannel(
+                    "channel is disconnected".into(),
+                ))?,
             },
         }
 
@@ -225,26 +225,26 @@ impl Uno8NfcDevice {
             Ok(o) => o,
             Err(e) => match e {
                 mpsc::RecvTimeoutError::Timeout => {
-                    Err(DeviceError::Timeout(format!("recieved read ACK")))?
+                    Err(DeviceError::Timeout("recieved read ACK".into()))?
                 }
-                mpsc::RecvTimeoutError::Disconnected => Err(DeviceError::MessageChannel(format!(
-                    "channel is disconnected"
-                )))?,
+                mpsc::RecvTimeoutError::Disconnected => Err(DeviceError::MessageChannel(
+                    "channel is disconnected".into(),
+                ))?,
             },
         })?;
 
         match message {
             ReadMessage::Ask => Ok(()),
             ReadMessage::Nack(code) => Err(DeviceError::Other(format!("returned Nack: {}", code))),
-            ReadMessage::Do(_) => Err(DeviceError::Other(format!(
-                "returned Do message not expected"
-            ))),
-            ReadMessage::Get(_) => Err(DeviceError::Other(format!(
-                "returned Get message not expected"
-            ))),
-            ReadMessage::Set(_) => Err(DeviceError::Other(format!(
-                "returned Set message not expected"
-            ))),
+            ReadMessage::Do(_) => Err(DeviceError::Other(
+                "returned Do message not expected".into(),
+            )),
+            ReadMessage::Get(_) => Err(DeviceError::Other(
+                "returned Get message not expected".into(),
+            )),
+            ReadMessage::Set(_) => Err(DeviceError::Other(
+                "returned Set message not expected".into(),
+            )),
         }
     }
 
@@ -252,9 +252,9 @@ impl Uno8NfcDevice {
         let tlv = self.read()?;
         match tlv.tag() {
             0xFF01 => Ok(tlv),
-            0xFF02 => Err(DeviceError::TlvContent(format!("Tag and length of Unsupported Instruction/s. Template contains chained tags and length of the instruction / s not supported by the PCD"), tlv)),
-            0xFF03 => Err(DeviceError::TlvContent(format!("Tag and length of Failed Instruction/s. Template contains chained tags and length of the instruction / s that failed; an error number may be added"), tlv)),
-            _ => Err(DeviceError::TlvContent(format!("Expected ResponseTemplates tag"), tlv))
+            0xFF02 => Err(DeviceError::TlvContent("Tag and length of Unsupported Instruction/s. Template contains chained tags and length of the instruction / s not supported by the PCD".into(), tlv)),
+            0xFF03 => Err(DeviceError::TlvContent("Tag and length of Failed Instruction/s. Template contains chained tags and length of the instruction / s that failed; an error number may be added".into(), tlv)),
+            _ => Err(DeviceError::TlvContent("Expected ResponseTemplates tag".into(), tlv))
         }
     }
 
@@ -263,19 +263,19 @@ impl Uno8NfcDevice {
             Ok(o) => o,
             Err(e) => match e {
                 mpsc::RecvTimeoutError::Timeout => {
-                    Err(DeviceError::Timeout(format!("recieved read")))?
+                    Err(DeviceError::Timeout("recieved read".into()))?
                 }
-                mpsc::RecvTimeoutError::Disconnected => Err(DeviceError::MessageChannel(format!(
-                    "channel is disconnected"
-                )))?,
+                mpsc::RecvTimeoutError::Disconnected => Err(DeviceError::MessageChannel(
+                    "channel is disconnected".into(),
+                ))?,
             },
         })?;
 
         let tlv = match message {
             ReadMessage::Ask => {
-                return Err(DeviceError::Other(format!(
-                    "returned Ack message not expected"
-                )))
+                return Err(DeviceError::Other(
+                    "returned Ack message not expected".into(),
+                ))
             }
             ReadMessage::Nack(code) => {
                 return Err(DeviceError::Other(format!(
@@ -302,16 +302,16 @@ impl Uno8NfcDevice {
                         thread::sleep(Duration::from_millis(1));
                         continue;
                     }
-                    TryRecvError::Disconnected => Err(DeviceError::MessageChannel(format!(
-                        "channel is disconnected"
-                    )))?,
+                    TryRecvError::Disconnected => Err(DeviceError::MessageChannel(
+                        "channel is disconnected".into(),
+                    ))?,
                 },
             })?;
 
             let tlv = match message {
-                ReadMessage::Ask => Err(DeviceError::Other(format!(
-                    "returned Ack message not expected"
-                )))?,
+                ReadMessage::Ask => Err(DeviceError::Other(
+                    "returned Ack message not expected".into(),
+                ))?,
                 ReadMessage::Nack(code) => Err(DeviceError::Other(format!(
                     "returned Nack({}) message not expected",
                     code
@@ -350,7 +350,7 @@ impl CardLessDevice for Uno8NfcDevice {
                 s.get_unique_id()
             )),
             None => Err(DeviceError::TlvContent(
-                format!("expected serial number tag"),
+                "expected serial number tag".into(),
                 tlv,
             )),
         }
@@ -396,10 +396,7 @@ impl CardLessDevice for Uno8NfcDevice {
                         return Ok(PollEmvResult::Success(tlv));
                     }
 
-                    Err(DeviceError::TlvContent(
-                        format!("invalid response TLV"),
-                        tlv,
-                    ))?;
+                    Err(DeviceError::TlvContent("invalid response TLV".into(), tlv))?;
                 }
                 Err(e) => match e {
                     DeviceError::OperationCanceled => {
@@ -412,24 +409,26 @@ impl CardLessDevice for Uno8NfcDevice {
         }
     }
 
-    fn ext_display_supported(&self) -> bool {
-        true
+    fn ext_dysplay(&self) -> Option<& dyn ExtDisplay> {
+        Some(self)
     }
+}
 
-    fn get_ext_display_mode(&self) -> Result<ExtDisplayMode, DeviceError> {
+impl ExtDisplay for Uno8NfcDevice {
+    fn get_display_mode(&self) -> Result<ExtDisplayMode, DeviceError> {
         self.write_get(Tlv::new(0xDF46, Value::Nothing)?)?;
 
         let tlv = self.read_success()?;
         match tlv.get_val::<ExtDisplayModeTagValue>("FF01 / DF46")? {
             Some(s) => Ok(*s),
             None => Err(DeviceError::TlvContent(
-                format!("expected external display mode tag"),
+                "expected external display mode tag".into(),
                 tlv,
             )),
         }
     }
 
-    fn set_ext_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError> {
+    fn set_display_mode(&self, value: &ExtDisplayMode) -> Result<(), DeviceError> {
         self.write_set(Tlv::new_spec(0xDF46, ExtDisplayModeTagValue::new(*value))?)?;
         self.read()?;
         Ok(())

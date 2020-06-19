@@ -24,3 +24,9 @@ impl From<TlvError> for DeviceError {
         DeviceError::MessageChannel(format!("{:?}", error))
     }
 }
+
+#[derive(Error, Debug)]
+pub enum StorageError {
+    #[error("device error")]
+    Device(#[from] DeviceError),
+}
