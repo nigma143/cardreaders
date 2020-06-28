@@ -1,5 +1,5 @@
 use card_less_reader::device::*;
-use uno8_nfc_reader::device_builder::Uno8NfcDeviceBuilder;
+use uno8_nfc_reader::{device::Uno8NfcDevice, device_builder::Uno8NfcDeviceBuilder};
 
 use cursive::menu::MenuTree;
 use cursive::traits::*;
@@ -12,117 +12,61 @@ use std::{
     sync::atomic::{AtomicBool, Ordering},
     thread,
 };
-/*
-enum Device {
-    Device1(dyn CardLessDevice),
-    Device2(dyn CardLessDevice + ExtDisplay)
-}*/
 
-struct DeviceGui<T>
-where
-    T: CardLessDevice,
-{
-    device: T,
-    menu: MenuTree,
+struct StubDevice;
+
+impl CardLessDevice for StubDevice {
+    fn get_sn(&self) -> Result<String, card_less_reader::error::DeviceError> {
+        todo!()
+    }
+    fn poll_emv(
+        &self,
+        purchase: Option<PollEmvPurchase>,
+        cancel_flag: Arc<AtomicBool>,
+    ) -> Result<PollEmvResult, card_less_reader::error::DeviceError> {
+        todo!()
+    }
 }
 
-impl<T: CardLessDevice> DeviceGui<T> {
-    fn simple(device: T) -> Self {
-        /*let mut this = Self {
-            device: device,
-            menu: MenuTree::new()
-        };
+enum Device {
+    Stub(StubDevice),
+    Uno8(Uno8NfcDevice)    
+}
 
-        this.menu.add_leaf("Get serial number", |x| this.get_sn_cmd(x));
-        this.menu.add_leaf("Poll emv", |x| poll_emv(x));
-*/
-        Self {
-            device: device,
-            menu: MenuTree::new()
-                .leaf("Get serial number", |x| self::get_sn_cmd(x))
-                .leaf("Poll emv", |x| poll_emv(x)),
+impl Device {  
+    fn ex_display(&self) -> Option<&impl ExtDisplay> {
+        match self {
+            Device::Stub(_) => None,
+            Device::Uno8(d) => Some(d)
         }
     }
-
-    fn run(&self, view: &mut Cursive) {
-        /*view.menubar()
-            .add_subtree("Commands", self.menu)
-            .add_delimiter()
-            .add_leaf("Quit", |s| s.quit());
-
-        view.set_autohide_menu(false);*/
-    }
-
-    fn get_sn_cmd(&self, view: &mut Cursive) {    
-        match self.device.get_sn() {
-            Ok(o) => view.add_layer(Dialog::info(format!("{}", o))),
-            Err(e) => view.add_layer(Dialog::info(format!("{}", e))),
-        };
-    }
 }
 
-impl<T: CardLessDevice + ExtDisplay> DeviceGui<T> {
-    fn with_ext_display(device: T) -> Self {
-        let mut g = DeviceGui::simple(device);
-        g.menu
-            .add_leaf("External display mode", |x| ext_display_mode_cmd(x));
-
-        g.device.get_display_mode();
-
-        g
-    }
-}
-
-struct D1 {}
-impl CardLessDevice for D1 {
+impl CardLessDevice for Device {
     fn get_sn(&self) -> Result<String, card_less_reader::error::DeviceError> {
-        todo!()
+        match self {
+            Device::Uno8(d) => d.get_sn(),
+            Device::Stub(d) => d.get_sn()
+        }
     }
+    
     fn poll_emv(
         &self,
         purchase: Option<PollEmvPurchase>,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<PollEmvResult, card_less_reader::error::DeviceError> {
-        todo!()
-    }
-}
-
-struct D2 {}
-impl CardLessDevice for D2 {
-    fn get_sn(&self) -> Result<String, card_less_reader::error::DeviceError> {
-        todo!()
-    }
-    fn poll_emv(
-        &self,
-        purchase: Option<PollEmvPurchase>,
-        cancel_flag: Arc<AtomicBool>,
-    ) -> Result<PollEmvResult, card_less_reader::error::DeviceError> {
-        todo!()
-    }
-}
-impl ExtDisplay for D2 {
-    fn get_display_mode(&self) -> Result<ExtDisplayMode, card_less_reader::error::DeviceError> {
-        todo!()
-    }
-    fn set_display_mode(
-        &self,
-        _: &ExtDisplayMode,
-    ) -> Result<(), card_less_reader::error::DeviceError> {
-        todo!()
+        match self {
+            Device::Uno8(d) => d.poll_emv(purchase, cancel_flag),
+            Device::Stub(d) => d.poll_emv(purchase, cancel_flag)
+        }
     }
 }
 
 struct Session {
-    device: Mutex<Box<dyn CardLessDevice>>,
+    device: Mutex<Device>,
 }
 
 fn main() {
-    //let d1Gui = DeviceGui::simple(D1 {});
-
-    //let d2Gui = DeviceGui::with_ext_display(D2 {});
-
-    //d2Gui.run2();
-
     // Initialize the cursive logger.
     cursive::logger::init();
 
@@ -197,7 +141,7 @@ fn connection(view: &mut Cursive) {
                             .finish();
 
                         x.set_user_data(Arc::new(Session {
-                            device: Mutex::new(Box::new(device)),
+                            device: Mutex::new(Device::Uno8(device)),
                         }));
 
                         x.pop_layer();
@@ -217,9 +161,11 @@ fn home(view: &mut Cursive) {
     let mut commands = MenuTree::new();
     commands.add_leaf("Get serial number", |x| get_sn_cmd(x));
 
-    if let Some(x) = device.ext_dysplay()  {
+    if let Some(_) = device.ex_display() {
         commands.add_leaf("External display mode", |x| ext_display_mode_cmd(x));
     }
+
+    //commands.add_leaf("External display mode", |x| ext_display_mode_cmd(x));
 
     commands.add_leaf("Poll emv", |x| poll_emv(x));
 
@@ -250,7 +196,8 @@ fn ext_display_mode_cmd(view: &mut Cursive) {
 
     let session = view.user_data::<Arc<Session>>().unwrap().clone();
     let device = session.device.lock().unwrap();
-    match device.ext_dysplay().unwrap().get_display_mode() {
+    
+    match  device.ex_display().unwrap().get_display_mode() {
         Ok(o) => {
             match o {
                 ExtDisplayMode::NoDisplay => no_ext_b.select(),
@@ -278,7 +225,8 @@ fn ext_display_mode_cmd(view: &mut Cursive) {
 
                 let session = x.user_data::<Arc<Session>>().unwrap().clone();
                 let device = session.device.lock().unwrap();
-                match device.ext_dysplay().unwrap().set_display_mode(&mode) {
+               
+                match device.ex_display().unwrap().set_display_mode(&mode) {
                     Ok(_) => {
                         x.pop_layer();
                     }

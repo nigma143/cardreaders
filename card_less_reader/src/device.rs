@@ -25,13 +25,13 @@ pub trait Storage {
     fn open_read_file(&self, file_path: String) -> StorageResult<&dyn Read>;
 
     fn open_write_file(&self, file_path: String) -> StorageResult<&dyn Write>;
-
+/*
     fn read_file(&self, file_path: String) -> StorageResult<Vec<u8>> {
         let mut buf_reader = BufReader::new(
             self.open_read_file(file_path));
 
        buf_reader.     
-    }
+    }*/
 }
 
 pub trait ExtDisplay {
@@ -48,14 +48,14 @@ pub trait CardLessDevice: Send {
         purchase: Option<PollEmvPurchase>,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<PollEmvResult, DeviceError>;
-
+/*
     fn ext_dysplay(&self) -> Option<&dyn ExtDisplay> {
         None
     }
 
     fn storage(&self) -> Option<&dyn Storage> {
         None
-    }
+    }*/
 }
 
 #[derive(Debug)]

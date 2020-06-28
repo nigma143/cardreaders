@@ -8,10 +8,10 @@ edition = "2018"
 
 [dependencies]
 card_less_reader = { path = "../card_less_reader" }
+card_reader = { path = "../card_reader" }
 uno8_nfc_reader = { path = "../uno8_nfc_reader" }
 
 hidapi = ""
-tlv_parser = ""
 simple_logger = ""
 cancellation = ""
 byteorder = ""

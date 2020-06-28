@@ -408,10 +408,10 @@ impl CardLessDevice for Uno8NfcDevice {
             };
         }
     }
-
+/*
     fn ext_dysplay(&self) -> Option<& dyn ExtDisplay> {
         Some(self)
-    }
+    }*/
 }
 
 impl ExtDisplay for Uno8NfcDevice {
