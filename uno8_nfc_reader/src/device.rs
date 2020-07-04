@@ -357,7 +357,7 @@ impl CardLessDevice for Uno8NfcDevice {
     }
 
     fn poll_emv(
-        &self,
+        &mut self,
         purchase: Option<PollEmvPurchase>,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<PollEmvResult, DeviceError> {
@@ -408,10 +408,14 @@ impl CardLessDevice for Uno8NfcDevice {
             };
         }
     }
-/*
-    fn ext_dysplay(&self) -> Option<& dyn ExtDisplay> {
+
+    fn ext_display(&mut self) -> Option<& dyn ExtDisplay> {
         Some(self)
-    }*/
+    }
+    
+    fn storage(&mut self) -> Option<&dyn Storage> {
+        None
+    }
 }
 
 impl ExtDisplay for Uno8NfcDevice {

@@ -8,7 +8,6 @@ edition = "2018"
 
 [dependencies]
 card_less_reader = { path = "../card_less_reader" }
-card_reader = { path = "../card_reader" }
 uno8_nfc_reader = { path = "../uno8_nfc_reader" }
 
 hidapi = ""
@@ -17,6 +16,8 @@ cancellation = ""
 byteorder = ""
 log = ""
 #cursive = { git = "https://github.com/gyscos/cursive" }
+
+enum_dispatch = ""
 
 [dependencies.cursive]
 version = "0.15.0"

@@ -1,4 +1,4 @@
-use card_less_reader::device::*;
+use card_less_reader::{error::DeviceError, device::*};
 use uno8_nfc_reader::{device::Uno8NfcDevice, device_builder::Uno8NfcDeviceBuilder};
 
 use cursive::menu::MenuTree;
@@ -20,30 +20,36 @@ impl CardLessDevice for StubDevice {
         todo!()
     }
     fn poll_emv(
-        &self,
+        &mut self,
         purchase: Option<PollEmvPurchase>,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<PollEmvResult, card_less_reader::error::DeviceError> {
+        todo!()
+    }
+    fn ext_display(&mut self) -> Option<&dyn ExtDisplay> {
+        None
+    }
+    fn storage(&mut self) -> Option<&dyn Storage> {
+        None
+    }
+}
+
+impl ExtDisplay for StubDevice {
+    fn get_display_mode(&self) -> Result<ExtDisplayMode, card_less_reader::error::DeviceError> {
+        todo!()
+    }
+    fn set_display_mode(&self, mode: &ExtDisplayMode) -> Result<(), card_less_reader::error::DeviceError> {
         todo!()
     }
 }
 
 enum Device {
     Stub(StubDevice),
-    Uno8(Uno8NfcDevice)    
-}
-
-impl Device {  
-    fn ex_display(&self) -> Option<&impl ExtDisplay> {
-        match self {
-            Device::Stub(_) => None,
-            Device::Uno8(d) => Some(d)
-        }
-    }
+    Uno8(Uno8NfcDevice)  
 }
 
 impl CardLessDevice for Device {
-    fn get_sn(&self) -> Result<String, card_less_reader::error::DeviceError> {
+    fn get_sn(&self) -> Result<String, DeviceError> {
         match self {
             Device::Uno8(d) => d.get_sn(),
             Device::Stub(d) => d.get_sn()
@@ -51,13 +57,27 @@ impl CardLessDevice for Device {
     }
     
     fn poll_emv(
-        &self,
+        &mut self,
         purchase: Option<PollEmvPurchase>,
         cancel_flag: Arc<AtomicBool>,
     ) -> Result<PollEmvResult, card_less_reader::error::DeviceError> {
         match self {
             Device::Uno8(d) => d.poll_emv(purchase, cancel_flag),
             Device::Stub(d) => d.poll_emv(purchase, cancel_flag)
+        }
+    }
+
+    fn ext_display(&mut self) -> Option<&dyn ExtDisplay> {
+        match self {
+            Device::Uno8(d) => d.ext_display(),
+            Device::Stub(d) => d.ext_display(),
+        }
+    }
+
+    fn storage(&mut self) -> Option<&dyn Storage> {
+        match self {
+            Device::Uno8(d) => d.storage(),
+            Device::Stub(d) => d.storage(),
         }
     }
 }
@@ -154,18 +174,20 @@ fn connection(view: &mut Cursive) {
     );
 }
 
+fn test(device: Arc<Mutex<impl CardLessDevice + ExtDisplay>>) {
+
+}
+
 fn home(view: &mut Cursive) {
     let session = view.user_data::<Arc<Session>>().unwrap().clone();
-    let device = session.device.lock().unwrap();
+    let mut device = session.device.lock().unwrap();
 
     let mut commands = MenuTree::new();
     commands.add_leaf("Get serial number", |x| get_sn_cmd(x));
 
-    if let Some(_) = device.ex_display() {
+    if let Some(_) = device.ext_display() {
         commands.add_leaf("External display mode", |x| ext_display_mode_cmd(x));
     }
-
-    //commands.add_leaf("External display mode", |x| ext_display_mode_cmd(x));
 
     commands.add_leaf("Poll emv", |x| poll_emv(x));
 
@@ -195,9 +217,9 @@ fn ext_display_mode_cmd(view: &mut Cursive) {
     let mut send_f_b = mode.button(ExtDisplayMode::Full, "SendFilteredPresetMessages");
 
     let session = view.user_data::<Arc<Session>>().unwrap().clone();
-    let device = session.device.lock().unwrap();
+    let mut device = session.device.lock().unwrap();
     
-    match  device.ex_display().unwrap().get_display_mode() {
+    match  device.ext_display().unwrap().get_display_mode() {
         Ok(o) => {
             match o {
                 ExtDisplayMode::NoDisplay => no_ext_b.select(),
@@ -224,9 +246,9 @@ fn ext_display_mode_cmd(view: &mut Cursive) {
                 let mode = mode.selection();
 
                 let session = x.user_data::<Arc<Session>>().unwrap().clone();
-                let device = session.device.lock().unwrap();
+                let mut device = session.device.lock().unwrap();
                
-                match device.ex_display().unwrap().set_display_mode(&mode) {
+                match device.ext_display().unwrap().set_display_mode(&mode) {
                     Ok(_) => {
                         x.pop_layer();
                     }
@@ -314,7 +336,7 @@ fn poll_emv(view: &mut Cursive) {
                 let sb_sink = x.cb_sink().clone();
 
                 thread::spawn(move || {
-                    let device = session.device.lock().unwrap();
+                    let mut device = session.device.lock().unwrap();
 
                     match device.poll_emv(
                         Some(PollEmvPurchase::new(p_type, currency_code, amount)),

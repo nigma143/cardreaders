@@ -2,6 +2,7 @@
 
 members = [
     "test_app",
+    "card_reader",
     "card_less_reader",
     "uno8_nfc_reader",
 ]
